@@ -1,0 +1,60 @@
+# =============================================================================
+# Sistema DUE - Siscomex
+# =============================================================================
+
+# Ambiente Python
+venv/
+env/
+.venv/
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+pip-log.txt
+pip-delete-this-directory.txt
+
+# Configuracoes sensiveis (IMPORTANTE!)
+config.env
+.env
+*.env.local
+
+# Cache de tokens
+token_cache.pkl
+*.pkl
+
+# Dados locais (nao versionar)
+dados/
+*.csv
+
+# Logs
+logs/
+*.log
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# Sistema operacional
+.DS_Store
+Thumbs.db
+
+# Testes
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+
+# Build
+build/
+dist/
+*.egg-info/
+*.egg
+
+# Arquivos temporarios
+*.tmp
+*.temp
+*.bak

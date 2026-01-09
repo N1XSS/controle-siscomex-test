@@ -1,0 +1,28 @@
+# Sistema de Controle de DU-Es e Tabelas de Suporte - Siscomex
+# Dependências Python necessárias
+
+# Core dependencies
+pandas>=1.5.0
+requests>=2.28.0
+python-dotenv>=0.19.0
+urllib3>=1.26.0
+pyodbc>=4.0.0          # Para conexão com SAP HANA (requer driver ODBC instalado)
+psycopg2-binary>=2.9.0 # Para conexão com PostgreSQL
+
+# Optional dependencies for enhanced functionality
+openpyxl>=3.0.0          # Para exportação Excel
+xlsxwriter>=3.0.0        # Para exportação Excel avançada
+matplotlib>=3.5.0        # Para gráficos e visualizações
+seaborn>=0.11.0          # Para visualizações estatísticas
+plotly>=5.0.0            # Para gráficos interativos
+
+# Development dependencies (opcional)
+pytest>=7.0.0            # Para testes
+black>=22.0.0            # Para formatação de código
+flake8>=4.0.0            # Para linting
+mypy>=0.950              # Para verificação de tipos
+
+# Performance dependencies (opcional)
+numpy>=1.21.0            # Para operações numéricas
+psutil>=5.8.0            # Para monitoramento de sistema
+memory-profiler>=0.60.0  # Para análise de memória
