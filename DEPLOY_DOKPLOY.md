@@ -17,24 +17,32 @@ Este guia explica como fazer o deploy do sistema na VPS usando o Dokploy.
 
 ## Passo 2: Configurar Variáveis de Ambiente
 
-No Dokploy, configure as seguintes variáveis de ambiente:
+**IMPORTANTE**: No Dokploy, configure as variáveis de ambiente na seção "Environment Variables" do projeto. **NÃO** crie arquivo `.env` dentro do container.
 
-### Credenciais Siscomex
+### Variáveis Obrigatórias - PostgreSQL
+
+```
+POSTGRES_HOST=31.97.22.234
+POSTGRES_PORT=5440
+POSTGRES_USER=gestor_siscomex
+POSTGRES_PASSWORD=sua_senha_aqui
+POSTGRES_DB=siscomex_export_db
+```
+
+**⚠️ ATENÇÃO**: Se estiver usando PostgreSQL externo (como no exemplo acima), certifique-se de que:
+- O firewall permite conexões da VPS (IP da VPS)
+- O PostgreSQL está configurado para aceitar conexões remotas
+- A porta está aberta (5440 no exemplo)
+
+### Variáveis Obrigatórias - Credenciais Siscomex
+
 ```
 SISCOMEX_CLIENT_ID=seu_client_id
 SISCOMEX_CLIENT_SECRET=seu_client_secret
 ```
 
-### PostgreSQL
-```
-POSTGRES_HOST=seu_host_postgresql
-POSTGRES_PORT=5432
-POSTGRES_USER=seu_usuario
-POSTGRES_PASSWORD=sua_senha
-POSTGRES_DB=nome_do_banco
-```
+### Variáveis Obrigatórias - AWS Athena
 
-### AWS Athena
 ```
 AWS_ACCESS_KEY=sua_aws_access_key
 AWS_SECRET_KEY=sua_aws_secret_key
@@ -45,11 +53,20 @@ ATHENA_WORKGROUP=primary
 S3_OUTPUT_LOCATION=s3://locks-query-result/athena_odbc/
 ```
 
-### Opcional
+### Variáveis Opcionais
+
 ```
 TZ=America/Sao_Paulo
 PYTHONUNBUFFERED=1
 ```
+
+### Como Configurar no Dokploy
+
+1. No projeto, vá em **"Environment Variables"** ou **"Env"**
+2. Clique em **"Add Variable"**
+3. Adicione cada variável (nome e valor)
+4. Salve as alterações
+5. Faça **redeploy** do container para aplicar as mudanças
 
 ## Passo 3: Configurar Build
 

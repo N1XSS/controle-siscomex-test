@@ -14,7 +14,9 @@ from dotenv import load_dotenv
 
 from db_schema import ALL_TABLES, DROP_ALL_TABLES
 
-load_dotenv('config.env')
+# Carregar variáveis de ambiente (arquivo .env se existir, mas não sobrescreve variáveis já definidas)
+# No Docker, as variáveis vêm do ambiente (Dokploy), não de arquivos
+load_dotenv()
 
 
 # =============================================================================
