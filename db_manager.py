@@ -4,6 +4,7 @@ Sistema DUE - Siscomex
 """
 
 import os
+import time
 import psycopg2
 from psycopg2 import sql
 from psycopg2.extras import execute_values, RealDictCursor
@@ -996,6 +997,106 @@ class DatabaseManager:
             self.conn.rollback()
             print(f"[ERRO] Erro ao inserir atos concessórios em {tabela}: {e}")
             raise
+    
+    # =========================================================================
+    # ATUALIZACAO EM BATCH
+    # =========================================================================
+    
+    def atualizar_data_ultima_atualizacao_batch(self, numeros_due: List[str]) -> int:
+        """
+        Atualiza data_ultima_atualizacao para múltiplas DUEs de uma vez.
+        Processa em lotes menores para evitar problemas de conexão.
+        
+        Args:
+            numeros_due: Lista de números de DUE para atualizar
+        
+        Returns:
+            Número de DUEs atualizadas
+        """
+        if not numeros_due:
+            return 0
+        
+        # Verificar/reconectar se necessário
+        try:
+            if not self.conn:
+                if not self.conectar():
+                    print("[ERRO] Nao foi possivel conectar ao banco de dados")
+                    return 0
+            # Testar conexão fazendo uma query simples
+            with self.conn.cursor() as cur:
+                cur.execute("SELECT 1")
+        except (psycopg2.InterfaceError, psycopg2.OperationalError):
+            # Conexão fechada ou inválida, reconectar
+            if not self.conectar():
+                print("[ERRO] Nao foi possivel reconectar ao banco de dados")
+                return 0
+        
+        total_atualizado = 0
+        tamanho_lote = 50  # Processar em lotes de 50 para evitar problemas de conexão
+        
+        try:
+            agora = datetime.utcnow().isoformat()
+            
+            # Processar em lotes
+            for i in range(0, len(numeros_due), tamanho_lote):
+                lote = numeros_due[i:i + tamanho_lote]
+                
+                try:
+                    # Verificar conexão antes de cada lote
+                    try:
+                        with self.conn.cursor() as test_cur:
+                            test_cur.execute("SELECT 1")
+                    except (psycopg2.InterfaceError, psycopg2.OperationalError):
+                        # Conexão fechada, reconectar
+                        if not self.conectar():
+                            print(f"[ERRO] Conexao fechada, nao foi possivel reconectar")
+                            break
+                    
+                    query = """
+                        UPDATE due_principal
+                        SET data_ultima_atualizacao = %s
+                        WHERE numero = ANY(%s)
+                    """
+                    
+                    with self.conn.cursor() as cur:
+                        cur.execute(query, (agora, lote))
+                        count = cur.rowcount
+                        total_atualizado += count
+                    
+                    self.conn.commit()
+                    
+                    # Pequeno delay entre lotes para não sobrecarregar o servidor
+                    time.sleep(0.1)
+                    
+                except Exception as e:
+                    # Tentar rollback apenas se conexão ainda estiver aberta
+                    try:
+                        if self.conn:
+                            self.conn.rollback()
+                    except:
+                        pass
+                    
+                    print(f"[ERRO] Erro ao atualizar lote {i//tamanho_lote + 1}: {e}")
+                    # Tentar reconectar para próximo lote
+                    try:
+                        with self.conn.cursor() as test_cur:
+                            test_cur.execute("SELECT 1")
+                    except (psycopg2.InterfaceError, psycopg2.OperationalError):
+                        if not self.conectar():
+                            print("[ERRO] Nao foi possivel reconectar, interrompendo")
+                            break
+            
+            return total_atualizado
+            
+        except Exception as e:
+            # Tentar rollback apenas se conexão ainda estiver aberta
+            try:
+                if self.conn:
+                    self.conn.rollback()
+            except:
+                pass
+            print(f"[ERRO] Erro ao atualizar data_ultima_atualizacao em batch: {e}")
+            return total_atualizado
     
     # =========================================================================
     # ESTATISTICAS

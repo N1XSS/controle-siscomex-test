@@ -28,6 +28,9 @@ from token_manager import token_manager
 from db_manager import db_manager
 import time
 import argparse
+from concurrent.futures import ThreadPoolExecutor, as_completed
+import threading
+import requests
 
 warnings.filterwarnings('ignore')
 load_dotenv('config.env')
@@ -185,23 +188,29 @@ def verificar_se_due_mudou(numero_due, data_registro_bd):
         data_registro_bd: Data de registro armazenada no banco
     
     Returns:
-        tuple: (mudou: bool, dados_due: dict ou None)
+        tuple: (mudou: bool, dados_due: dict ou None, mensagem_erro: str ou None)
     """
     try:
         url = f"{URL_DUE_BASE}/numero-da-due/{numero_due}"
         response = token_manager.session.get(url, headers=token_manager.obter_headers(), timeout=10)
         
         if response.status_code == 401:
-            return None, None  # Token expirado
+            return None, None, "Token expirado (401)"
+        
+        if response.status_code == 404:
+            return None, None, f"DUE não encontrada (404)"
+        
+        if response.status_code == 422:
+            return None, None, f"Erro de validação (422) - possível rate limiting"
         
         if response.status_code != 200:
-            return None, None
+            return None, None, f"Status HTTP {response.status_code}"
         
         dados = response.json()
         data_registro_api_str = dados.get('dataDeRegistro', '')
         
         if not data_registro_api_str:
-            return True, dados  # Sem data, atualizar por seguranca
+            return True, dados, None  # Sem data, atualizar por seguranca
         
         # Converter e comparar datas
         try:
@@ -215,17 +224,21 @@ def verificar_se_due_mudou(numero_due, data_registro_bd):
                 
                 # Se a data da API for mais recente, houve mudanca
                 if data_api_naive > data_bd_naive:
-                    return True, dados
+                    return True, dados, None
                 else:
-                    return False, None  # Nao mudou
+                    return False, None, None  # Nao mudou
             else:
-                return True, dados  # Sem data no BD, atualizar
+                return True, dados, None  # Sem data no BD, atualizar
                 
         except (ValueError, TypeError) as e:
-            return True, dados  # Erro na conversao, atualizar por seguranca
+            return True, dados, None  # Erro na conversao, atualizar por seguranca
             
+    except requests.exceptions.Timeout:
+        return None, None, "Timeout na requisição"
+    except requests.exceptions.ConnectionError:
+        return None, None, "Erro de conexão com o servidor"
     except Exception as e:
-        return None, None  # Erro de conexao
+        return None, None, f"Erro inesperado: {str(e)[:100]}"
 
 
 def consultar_dados_adicionais(numero_due, dados_due):
@@ -262,6 +275,185 @@ def consultar_dados_adicionais(numero_due, dados_due):
         pass
     
     return atos_suspensao, atos_isencao, exigencias_fiscais
+
+
+def processar_due_averbada_antiga(due_info):
+    """
+    Processa uma única DUE averbada antiga (thread-safe).
+    
+    Args:
+        due_info: dict com 'numero' e 'data_registro_bd'
+    
+    Returns:
+        dict com resultado: {
+            'numero_due': str,
+            'mudou': bool ou None,
+            'dados_norm': dict ou None,
+            'erro': bool
+        }
+    """
+    numero_due = due_info['numero']
+    data_registro_bd = due_info['data_registro_bd']
+    
+    resultado = {
+        'numero_due': numero_due,
+        'mudou': None,
+        'dados_norm': None,
+        'erro': False,
+        'mensagem_erro': None
+    }
+    
+    try:
+        # Verificar se mudou
+        mudou, dados_due, mensagem_erro = verificar_se_due_mudou(numero_due, data_registro_bd)
+        
+        if mudou is None:
+            resultado['erro'] = True
+            resultado['mensagem_erro'] = mensagem_erro or 'Falha ao verificar DUE (resposta None)'
+            return resultado
+        
+        resultado['mudou'] = mudou
+        
+        if mudou and dados_due:
+            # Houve mudança, processar dados completos
+            try:
+                from due_processor import processar_dados_due
+                atos_susp, atos_isen, exig = consultar_dados_adicionais(numero_due, dados_due)
+                dados_norm = processar_dados_due(dados_due, atos_susp, atos_isen, exig)
+                resultado['dados_norm'] = dados_norm
+            except Exception as e:
+                resultado['erro'] = True
+                resultado['mensagem_erro'] = f'Erro ao processar dados completos: {str(e)[:100]}'
+        
+        # Delay para rate limiting (respeitando limite de 1000 req/hora do Siscomex)
+        # Com 5 workers e sleep de 0.5s: ~600 req/hora (seguro)
+        time.sleep(0.5)
+        
+    except Exception as e:
+        resultado['erro'] = True
+        resultado['mensagem_erro'] = f'Erro inesperado: {str(e)[:100]}'
+    
+    return resultado
+
+
+def processar_dues_averbadas_antigas_paralelo(dues_info_list, max_workers=8):
+    """
+    Processa DUEs averbadas antigas em paralelo usando ThreadPoolExecutor.
+    
+    Args:
+        dues_info_list: Lista de dicts com 'numero' e 'data_registro_bd'
+        max_workers: Número máximo de threads paralelas (padrão: 8)
+    
+    Returns:
+        tuple: (
+            dados_consolidados: dict,
+            dues_sem_mudanca: list[str],
+            stats: dict
+        )
+    """
+    dados_consolidados = {
+        'due_principal': [],
+        'due_eventos_historico': [],
+        'due_itens': [],
+        'due_item_enquadramentos': [],
+        'due_item_paises_destino': [],
+        'due_item_tratamentos_administrativos': [],
+        'due_item_tratamentos_administrativos_orgaos': [],
+        'due_item_notas_remessa': [],
+        'due_item_nota_fiscal_exportacao': [],
+        'due_item_notas_complementares': [],
+        'due_item_atributos': [],
+        'due_item_documentos_importacao': [],
+        'due_item_documentos_transformacao': [],
+        'due_item_calculo_tributario_tratamentos': [],
+        'due_item_calculo_tributario_quadros': [],
+        'due_situacoes_carga': [],
+        'due_solicitacoes': [],
+        'due_declaracao_tributaria_compensacoes': [],
+        'due_declaracao_tributaria_recolhimentos': [],
+        'due_declaracao_tributaria_contestacoes': [],
+        'due_atos_concessorios_suspensao': [],
+        'due_atos_concessorios_isencao': [],
+        'due_exigencias_fiscais': []
+    }
+    
+    dues_sem_mudanca = []
+    dues_com_erro = []  # Lista de DUEs com erro e detalhes
+    stats = {
+        'mudou': 0,
+        'sem_mudanca': 0,
+        'erros': 0
+    }
+    
+    total = len(dues_info_list)
+    processados = 0
+    lock = threading.Lock()
+    
+    # Ajustar max_workers baseado no total (respeitando limite de 1000 req/hora do Siscomex)
+    # Cálculo de rate limiting:
+    # - Limite Siscomex: 1000 req/hora = ~16.67 req/min = ~0.28 req/s
+    # - Cada DUE: 1 req para verificar + até 3 req adicionais se mudou = máximo 4 req/DUE
+    # - Na prática: maioria das DUEs não muda (1 req apenas)
+    # - Com 5 workers e sleep de 0.5s: cada worker faz ~2 req/s = 10 req/s total
+    # - Para 466 DUEs (1 req cada): ~46.6 segundos de processamento
+    # - Isso resulta em ~466 req em ~47s = ~600 req/hora (bem abaixo de 1000)
+    # - Se algumas DUEs mudarem (4 req cada), ainda fica dentro do limite
+    max_workers = min(max_workers, 5, total)
+    
+    print(f"  [INFO] Processando {total} DUEs com {max_workers} workers paralelos...")
+    
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        # Submeter todas as tarefas
+        future_to_due = {
+            executor.submit(processar_due_averbada_antiga, due_info): due_info
+            for due_info in dues_info_list
+        }
+        
+        # Processar resultados conforme completam
+        for future in as_completed(future_to_due):
+            due_info = future_to_due[future]
+            processados += 1
+            
+            try:
+                resultado = future.result(timeout=30)
+                
+                with lock:
+                    if resultado['erro']:
+                        stats['erros'] += 1
+                        # Armazenar detalhes do erro
+                        erro_info = {
+                            'numero_due': resultado['numero_due'],
+                            'mensagem': resultado.get('mensagem_erro', 'Erro desconhecido')
+                        }
+                        dues_com_erro.append(erro_info)
+                    elif resultado['mudou']:
+                        stats['mudou'] += 1
+                        if resultado['dados_norm']:
+                            # Consolidar dados normalizados
+                            for tabela, dados in resultado['dados_norm'].items():
+                                if tabela in dados_consolidados:
+                                    dados_consolidados[tabela].extend(dados)
+                    else:
+                        stats['sem_mudanca'] += 1
+                        dues_sem_mudanca.append(resultado['numero_due'])
+                
+                # Progresso a cada 50 DUEs
+                if processados % 50 == 0:
+                    print(f"  [PROGRESSO] {processados}/{total}...")
+                    
+            except Exception as e:
+                with lock:
+                    stats['erros'] += 1
+                    # Armazenar erro de timeout ou exceção
+                    erro_info = {
+                        'numero_due': due_info.get('numero', 'DESCONHECIDA'),
+                        'mensagem': f'Timeout ou exceção: {str(e)[:100]}'
+                    }
+                    dues_com_erro.append(erro_info)
+                if processados % 50 == 0:
+                    print(f"  [PROGRESSO] {processados}/{total}... (erro: {str(e)[:30]})")
+    
+    return dados_consolidados, dues_sem_mudanca, stats, dues_com_erro
 
 
 def atualizar_dues():
@@ -402,43 +594,33 @@ def atualizar_dues():
             
             time.sleep(0.3)
     
-    # 6. Processar DUEs AVERBADAS ANTIGAS (verificar antes)
+    # 6. Processar DUEs AVERBADAS ANTIGAS (verificar antes) - PARALELO
+    dues_sem_mudanca = []
+    dues_com_erro = []
     if dues_info['averbadas_antigas']:
-        print(f"\n[FASE 2] Verificando {len(dues_info['averbadas_antigas'])} DUEs averbadas antigas...")
+        print(f"\n[FASE 2] Verificando {len(dues_info['averbadas_antigas'])} DUEs averbadas antigas (PARALELO)...")
         
-        for i, due_info in enumerate(dues_info['averbadas_antigas'], 1):
-            numero_due = due_info['numero']
-            data_registro_bd = due_info['data_registro_bd']
-            
-            if i % 50 == 0:
-                print(f"  [PROGRESSO] {i}/{len(dues_info['averbadas_antigas'])}...")
-            
-            # Verificar se mudou
-            mudou, dados_due = verificar_se_due_mudou(numero_due, data_registro_bd)
-            
-            if mudou is None:
-                stats['averbadas_antigas_erro'] += 1
-                time.sleep(0.3)
-                continue
-            
-            if mudou and dados_due:
-                # Houve mudanca, processar dados completos
-                atos_susp, atos_isen, exig = consultar_dados_adicionais(numero_due, dados_due)
-                dados_norm = processar_dados_due(dados_due, atos_susp, atos_isen, exig)
-                
-                if dados_norm:
-                    for tabela, dados in dados_norm.items():
-                        if tabela in dados_consolidados:
-                            dados_consolidados[tabela].extend(dados)
-                    stats['averbadas_antigas_mudou'] += 1
-                else:
-                    stats['averbadas_antigas_erro'] += 1
-            else:
-                # Nao mudou, apenas atualizar data_ultima_atualizacao
-                stats['averbadas_antigas_sem_mudanca'] += 1
-                # TODO: Atualizar apenas data_ultima_atualizacao no banco
-            
-            time.sleep(0.3)
+        # Processar em paralelo
+        dados_paralelos, dues_sem_mudanca, stats_paralelos, dues_com_erro = processar_dues_averbadas_antigas_paralelo(
+            dues_info['averbadas_antigas']
+        )
+        
+        # Consolidar dados paralelos
+        for tabela, dados in dados_paralelos.items():
+            if tabela in dados_consolidados and dados:
+                dados_consolidados[tabela].extend(dados)
+        
+        # Atualizar estatísticas
+        stats['averbadas_antigas_mudou'] = stats_paralelos['mudou']
+        stats['averbadas_antigas_sem_mudanca'] = stats_paralelos['sem_mudanca']
+        stats['averbadas_antigas_erro'] = stats_paralelos['erros']
+        
+        # Atualizar data_ultima_atualizacao em batch para DUEs que não mudaram
+        if dues_sem_mudanca:
+            print(f"\n[INFO] Atualizando data_ultima_atualizacao para {len(dues_sem_mudanca)} DUEs sem mudança...")
+            count_atualizado = db_manager.atualizar_data_ultima_atualizacao_batch(dues_sem_mudanca)
+            if count_atualizado > 0:
+                print(f"[OK] {count_atualizado} DUEs atualizadas em batch")
     
     # 7. Salvar dados atualizados
     total_atualizadas = (stats['pendentes_ok'] + stats['averbadas_recentes_ok'] + 
@@ -478,6 +660,41 @@ def atualizar_dues():
     
     requisicoes_economizadas = total_ignoradas * 3  # 3 req extras por DUE que nao precisou atualizar
     print(f"\n  [OTIMIZACAO] ~{requisicoes_economizadas} requisicoes economizadas!")
+    
+    # Exibir detalhes dos erros se houver
+    if dues_com_erro:
+        print(f"\n  [DETALHES DOS ERROS] {len(dues_com_erro)} DUEs com erro:")
+        print("-" * 60)
+        
+        # Agrupar erros por tipo
+        erros_por_tipo = {}
+        for erro in dues_com_erro:
+            msg = erro['mensagem']
+            # Simplificar mensagem para agrupamento
+            if 'Falha ao verificar' in msg or 'resposta None' in msg:
+                tipo = 'Falha ao verificar DUE (API retornou None ou erro)'
+            elif 'processar dados completos' in msg:
+                tipo = 'Erro ao processar dados completos'
+            elif 'Timeout' in msg:
+                tipo = 'Timeout na requisição'
+            else:
+                tipo = msg[:50] + '...' if len(msg) > 50 else msg
+            
+            if tipo not in erros_por_tipo:
+                erros_por_tipo[tipo] = []
+            erros_por_tipo[tipo].append(erro['numero_due'])
+        
+        # Exibir resumo por tipo
+        for tipo, numeros in erros_por_tipo.items():
+            print(f"    • {tipo}: {len(numeros)} DUEs")
+            if len(numeros) <= 10:
+                # Se poucas DUEs, mostrar todas
+                print(f"      DUEs: {', '.join(numeros)}")
+            else:
+                # Se muitas, mostrar apenas as primeiras
+                print(f"      DUEs (primeiras 10): {', '.join(numeros[:10])}...")
+        
+        print("-" * 60)
 
 
 def main():
