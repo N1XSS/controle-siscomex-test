@@ -21,18 +21,70 @@ Este guia explica como fazer o deploy do sistema na VPS usando o Dokploy.
 
 ### Variáveis Obrigatórias - PostgreSQL
 
+**Se o PostgreSQL está na MESMA VPS:**
+
+Existem 3 cenários possíveis:
+
+#### 1. PostgreSQL em container Docker (mesma VPS)
+Se o PostgreSQL está rodando em um container Docker na mesma VPS, você tem duas opções:
+
+**Opção A - Usar nome do serviço Docker:**
 ```
-POSTGRES_HOST=31.97.22.234
+POSTGRES_HOST=postgres  # ou nome_do_servico_postgres
+POSTGRES_PORT=5432      # porta padrão do PostgreSQL
+POSTGRES_USER=gestor_siscomex
+POSTGRES_PASSWORD=sua_senha_aqui
+POSTGRES_DB=siscomex_export_db
+```
+
+**Opção B - Usar IP do container:**
+Descubra o IP do container PostgreSQL:
+```bash
+docker inspect nome_container_postgres | grep IPAddress
+```
+Depois use:
+```
+POSTGRES_HOST=172.17.0.2  # IP do container PostgreSQL
+POSTGRES_PORT=5432
+POSTGRES_USER=gestor_siscomex
+POSTGRES_PASSWORD=sua_senha_aqui
+POSTGRES_DB=siscomex_export_db
+```
+
+#### 2. PostgreSQL rodando diretamente na VPS (não containerizado)
+
+**Se o Dokploy usa rede Docker padrão:**
+```
+POSTGRES_HOST=host.docker.internal  # Acesso ao host da VPS
+POSTGRES_PORT=5440                  # Porta do PostgreSQL na VPS
+POSTGRES_USER=gestor_siscomex
+POSTGRES_PASSWORD=sua_senha_aqui
+POSTGRES_DB=siscomex_export_db
+```
+
+**Se o Dokploy permite usar network_mode: host:**
+No Dokploy, configure o container para usar `network_mode: host` e então:
+```
+POSTGRES_HOST=localhost  # ou 127.0.0.1
 POSTGRES_PORT=5440
 POSTGRES_USER=gestor_siscomex
 POSTGRES_PASSWORD=sua_senha_aqui
 POSTGRES_DB=siscomex_export_db
 ```
 
-**⚠️ ATENÇÃO**: Se estiver usando PostgreSQL externo (como no exemplo acima), certifique-se de que:
-- O firewall permite conexões da VPS (IP da VPS)
-- O PostgreSQL está configurado para aceitar conexões remotas
-- A porta está aberta (5440 no exemplo)
+#### 3. PostgreSQL externo (outra VPS/servidor)
+```
+POSTGRES_HOST=31.97.22.234  # IP externo
+POSTGRES_PORT=5440
+POSTGRES_USER=gestor_siscomex
+POSTGRES_PASSWORD=sua_senha_aqui
+POSTGRES_DB=siscomex_export_db
+```
+
+**⚠️ DICA**: Para descobrir qual opção usar:
+1. Se o PostgreSQL está em container Docker: use o nome do serviço ou IP do container
+2. Se está rodando diretamente na VPS: use `host.docker.internal` (padrão) ou `localhost` (se usar network_mode: host)
+3. Teste a conexão: `docker exec -it nome_container python3 -c "from db_manager import db_manager; db_manager.conectar()"`
 
 ### Variáveis Obrigatórias - Credenciais Siscomex
 
