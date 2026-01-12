@@ -1,0 +1,27 @@
+version: '3.8'
+
+services:
+  controle-siscomex:
+    build: .
+    container_name: controle-siscomex
+    restart: unless-stopped
+    
+    # Variáveis de ambiente (configure no Dokploy)
+    env_file:
+      - .env
+    
+    # Volumes para logs (opcional)
+    volumes:
+      - ./logs:/app/logs
+    
+    # Timezone
+    environment:
+      - TZ=America/Sao_Paulo
+    
+    # Healthcheck (opcional)
+    healthcheck:
+      test: ["CMD", "python3", "-c", "from db_manager import db_manager; db_manager.conectar() and db_manager.desconectar()"]
+      interval: 5m
+      timeout: 10s
+      retries: 3
+      start_period: 30s

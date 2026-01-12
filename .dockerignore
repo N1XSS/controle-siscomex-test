@@ -1,0 +1,57 @@
+# Git
+.git
+.gitignore
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+venv/
+env/
+.venv/
+
+# Configurações sensíveis
+config.env
+.env
+*.env.local
+
+# Dados e logs
+dados/
+logs/
+*.csv
+*.log
+*.pkl
+token_cache.pkl
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Sistema operacional
+.DS_Store
+Thumbs.db
+
+# Testes
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+
+# Build
+build/
+dist/
+*.egg-info/
+*.egg
+
+# Documentação
+docs/
+*.md
+!README.md
+!DEPLOY_DOKPLOY.md
+
+# Scripts locais
+scripts/
