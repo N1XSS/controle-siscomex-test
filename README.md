@@ -288,6 +288,12 @@ Para gerar um extrato similar ao PDF do Siscomex, consulte:
 
 ## Deploy em VPS
 
+> **📚 Documentação Completa de Deploy:**
+> - **[DEPLOY_DOKPLOY.md](DEPLOY_DOKPLOY.md)** - Guia completo de deploy no Dokploy (Docker)
+> - **[TUTORIAL_TESTES_VPS.md](TUTORIAL_TESTES_VPS.md)** - Tutorial passo a passo para testar e verificar o sistema na VPS (para leigos)
+
+### Deploy Manual (Sem Docker)
+
 ### 1. Clonar Repositorio
 
 ```bash
@@ -325,6 +331,12 @@ crontab -e
 ```bash
 python main.py --status
 ```
+
+### Deploy com Dokploy (Docker - Recomendado)
+
+Para deploy usando Docker no Dokploy, consulte:
+- **[DEPLOY_DOKPLOY.md](DEPLOY_DOKPLOY.md)** - Instruções completas de deploy
+- **[TUTORIAL_TESTES_VPS.md](TUTORIAL_TESTES_VPS.md)** - Como testar e verificar após o deploy
 
 ## Troubleshooting
 
