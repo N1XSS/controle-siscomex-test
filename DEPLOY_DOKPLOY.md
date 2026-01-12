@@ -260,13 +260,78 @@ docker exec -it controle-siscomex /bin/bash
 - Verifique se as variáveis estão configuradas no Dokploy (não precisa de arquivo .env)
 
 ### Erro: "connection to server at ... failed: timeout expired"
-- **PostgreSQL na mesma VPS**: Se o PostgreSQL está na mesma VPS, você pode estar usando o IP errado
-  - Se PostgreSQL está em container Docker: use o **nome do serviço** ou **IP do container**
-  - Se PostgreSQL está rodando diretamente na VPS: use `host.docker.internal` ou configure `network_mode: host`
-- **PostgreSQL externo**: Verifique se o firewall permite conexões
-- Verifique se o PostgreSQL aceita conexões remotas (postgresql.conf: `listen_addresses = '*'`)
-- Verifique se o pg_hba.conf permite conexões
-- Teste conectividade: `docker exec -it controle-siscomex nc -zv IP_POSTGRES PORTA`
+
+Este erro indica que o container não consegue alcançar o PostgreSQL. Possíveis causas:
+
+#### 1. PostgreSQL externo (IP remoto)
+Se você está usando um PostgreSQL externo (IP remoto, não local):
+
+**Problemas comuns:**
+- **Firewall bloqueando**: O firewall pode estar bloqueando conexões do container para o PostgreSQL
+- **PostgreSQL não aceita conexões remotas**: O PostgreSQL pode estar configurado apenas para localhost
+- **Rede do Docker**: O container pode não ter acesso à rede externa
+
+**Soluções:**
+
+**A. Verificar conectividade do container:**
+```bash
+# Acessar o container
+docker exec -it nome_container /bin/bash
+
+# Testar conectividade
+nc -zv 31.97.22.234 5440
+# ou
+telnet 31.97.22.234 5440
+```
+
+**B. Se a conectividade falhar:**
+- Verifique se o PostgreSQL aceita conexões remotas:
+  - No servidor do PostgreSQL, edite `postgresql.conf`: `listen_addresses = '*'`
+  - Edite `pg_hba.conf` para permitir conexões do IP da VPS:
+    ```
+    host    all    all    IP_DA_VPS/32    md5
+    ```
+- Verifique firewall do servidor PostgreSQL:
+  - Libere a porta 5440 para o IP da VPS
+  - `ufw allow from IP_DA_VPS to any port 5440`
+
+**C. No Dokploy - Configurar rede:**
+- Verifique se o container tem acesso à rede externa
+- No Dokploy, verifique configurações de rede do projeto
+
+#### 2. PostgreSQL na mesma VPS
+Se o PostgreSQL está na mesma VPS, você pode estar usando o IP errado:
+- Se PostgreSQL está em container Docker: use o **nome do serviço** ou **IP do container**
+- Se PostgreSQL está rodando diretamente na VPS: use `host.docker.internal` ou configure `network_mode: host`
+
+#### 3. Debug rápido
+Para diagnosticar rapidamente:
+
+```bash
+# 1. Verificar se o container consegue resolver DNS
+docker exec -it nome_container ping -c 2 31.97.22.234
+
+# 2. Verificar se consegue conectar à porta
+docker exec -it nome_container nc -zv 31.97.22.234 5440
+
+# 3. Testar conexão Python diretamente
+docker exec -it nome_container python3 -c "
+import psycopg2
+try:
+    conn = psycopg2.connect(
+        host='31.97.22.234',
+        port=5440,
+        user='gestor_siscomex',
+        password='H9#mZ8kP27vR58qX',
+        database='siscomex_export_db',
+        connect_timeout=5
+    )
+    print('OK: Conectado!')
+    conn.close()
+except Exception as e:
+    print(f'ERRO: {e}')
+"
+```
 
 ### Como descobrir a configuração correta (PostgreSQL criado como Database no Dokploy) ⭐
 
