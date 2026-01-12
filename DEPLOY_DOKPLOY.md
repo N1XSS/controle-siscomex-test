@@ -51,7 +51,48 @@ POSTGRES_PASSWORD=sua_senha_aqui
 POSTGRES_DB=siscomex_export_db
 ```
 
-#### 2. PostgreSQL rodando diretamente na VPS (não containerizado)
+#### 2. PostgreSQL criado como Database no Dokploy ⭐ **SEU CASO**
+
+Quando você cria um Database PostgreSQL no Dokploy, o Dokploy automaticamente:
+- Cria um container PostgreSQL gerenciado
+- Cria variáveis de ambiente de conexão que podem ser vinculadas ao seu aplicativo
+
+**Passos para configurar:**
+
+1. **No Dokploy, no seu projeto (aplicação):**
+   - Vá em **"Settings"** ou **"Environment Variables"**
+   - Procure por **"Link Database"** ou **"Add Database Connection"**
+   - Selecione o database PostgreSQL que você criou
+   - O Dokploy automaticamente adiciona variáveis como `DATABASE_URL`, `DB_HOST`, `DB_PORT`, etc.
+
+2. **Se o Dokploy usar variáveis padrão, configure manualmente:**
+   
+   O Dokploy geralmente cria variáveis no formato:
+   ```
+   POSTGRES_HOST=nome_do_database_service  # nome do serviço do database
+   POSTGRES_PORT=5432
+   POSTGRES_USER=postgres  # ou o usuário que você configurou
+   POSTGRES_PASSWORD=senha_gerada_pelo_dokploy
+   POSTGRES_DB=nome_do_database
+   ```
+
+3. **Alternativa - Usar nome do serviço:**
+   
+   Se o Dokploy criar o database com um nome de serviço (ex: `postgres-123`), você pode usar:
+   ```
+   POSTGRES_HOST=postgres-123  # nome do serviço do database no Dokploy
+   POSTGRES_PORT=5432
+   POSTGRES_USER=postgres
+   POSTGRES_PASSWORD=senha_do_database
+   POSTGRES_DB=nome_do_database
+   ```
+
+**💡 DICA**: No Dokploy, vá na página do seu Database PostgreSQL e procure por:
+- **"Connection String"** ou **"Connection Info"**
+- **"Internal URL"** ou **"Service Name"**
+- Use essas informações para configurar as variáveis
+
+#### 3. PostgreSQL rodando diretamente na VPS (não containerizado)
 
 **Se o Dokploy usa rede Docker padrão:**
 ```
@@ -227,23 +268,42 @@ docker exec -it controle-siscomex /bin/bash
 - Verifique se o pg_hba.conf permite conexões
 - Teste conectividade: `docker exec -it controle-siscomex nc -zv IP_POSTGRES PORTA`
 
-### Como descobrir a configuração correta (PostgreSQL na mesma VPS)
+### Como descobrir a configuração correta (PostgreSQL criado como Database no Dokploy) ⭐
 
-**1. Verificar se PostgreSQL está em container Docker:**
+**Se você criou o PostgreSQL como Database no Dokploy:**
+
+1. **No Dokploy:**
+   - Vá para a página do seu Database PostgreSQL
+   - Procure por **"Connection Info"**, **"Internal URL"** ou **"Service Details"**
+   - O Dokploy geralmente mostra:
+     - **Host/Service Name**: Nome do serviço (ex: `postgres-abc123` ou `pg-xxx`)
+     - **Port**: Geralmente `5432`
+     - **User**: Geralmente `postgres` ou o que você configurou
+     - **Password**: A senha que você definiu ou que o Dokploy gerou
+     - **Database**: Nome do database
+
+2. **Configurar variáveis no seu aplicativo:**
+   ```
+   POSTGRES_HOST=nome_do_servico  # Ex: postgres-abc123 ou pg-xxx (do passo 1)
+   POSTGRES_PORT=5432
+   POSTGRES_USER=postgres  # ou o user do passo 1
+   POSTGRES_PASSWORD=senha_do_database  # do passo 1
+   POSTGRES_DB=nome_do_database  # do passo 1
+   ```
+
+3. **Linkar Database (se disponível):**
+   - No seu projeto, vá em **"Settings"** → **"Link Database"**
+   - Selecione seu database PostgreSQL
+   - O Dokploy pode criar variáveis automaticamente (ex: `DATABASE_URL`)
+
+**Se PostgreSQL está em container Docker manual:**
 ```bash
 docker ps | grep postgres
-```
-Se retornar um container, note o nome e use como `POSTGRES_HOST`
-
-**2. Se PostgreSQL está em container, descobrir IP:**
-```bash
 docker inspect nome_container_postgres | grep IPAddress
 ```
-Use esse IP como `POSTGRES_HOST`
 
-**3. Se PostgreSQL está rodando diretamente na VPS:**
+**Se PostgreSQL está rodando diretamente na VPS:**
 - Use `host.docker.internal` como `POSTGRES_HOST`
-- Ou configure o container no Dokploy para usar `network_mode: host` (então use `localhost`)
 
 ### Erro: "connection to server on socket ... failed: No such file or directory"
 - **Variáveis não configuradas**: O sistema está tentando conectar via socket local
