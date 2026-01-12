@@ -2,6 +2,8 @@
 
 Este guia explica como fazer o deploy do sistema na VPS usando o Dokploy.
 
+> **📚 Tutorial de Testes**: Para aprender como testar e verificar o sistema após o deploy, consulte o arquivo **[TUTORIAL_TESTES_VPS.md](TUTORIAL_TESTES_VPS.md)** - Guia passo a passo para leigos.
+
 ## Pré-requisitos
 
 1. VPS com Dokploy instalado e configurado
