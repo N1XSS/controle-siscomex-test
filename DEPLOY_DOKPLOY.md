@@ -159,23 +159,43 @@ docker exec -it controle-siscomex /bin/bash
 
 ### Container não inicia
 - Verifique os logs no Dokploy
-- Verifique se todas as variáveis de ambiente estão configuradas
-- Verifique a conexão com PostgreSQL
+- Verifique se todas as variáveis de ambiente obrigatórias estão configuradas
+- Verifique se as variáveis foram salvas corretamente no Dokploy
+
+### Erro: "Arquivo .env ou config.env nao encontrado"
+- **Isso é NORMAL no Docker!** O sistema funciona com variáveis de ambiente do Dokploy
+- Verifique se as variáveis estão configuradas no Dokploy (não precisa de arquivo .env)
+
+### Erro: "connection to server at ... failed: timeout expired"
+- **Firewall/Rede**: O PostgreSQL pode não estar acessível da VPS
+- Verifique se o firewall permite conexões da VPS para o PostgreSQL
+- Verifique se o PostgreSQL aceita conexões remotas (postgresql.conf: `listen_addresses = '*'`)
+- Verifique se o pg_hba.conf permite conexões da VPS
+- Teste conectividade: `docker exec -it controle-siscomex nc -zv IP_POSTGRES 5440`
+
+### Erro: "connection to server on socket ... failed: No such file or directory"
+- **Variáveis não configuradas**: O sistema está tentando conectar via socket local
+- Verifique se `POSTGRES_HOST` está configurado no Dokploy
+- Verifique se todas as variáveis PostgreSQL estão configuradas
+- Faça redeploy após configurar as variáveis
+
+### Erro de conexão PostgreSQL
+- Verifique as credenciais no Dokploy (POSTGRES_HOST, POSTGRES_PORT, POSTGRES_USER, POSTGRES_PASSWORD, POSTGRES_DB)
+- Verifique se o PostgreSQL está acessível da VPS (firewall/rede)
+- Teste a conexão: `docker exec -it controle-siscomex python3 -c "from db_manager import db_manager; db_manager.conectar()"`
+- Verifique logs: `docker exec -it controle-siscomex env | grep POSTGRES`
 
 ### Sincronização não executa
 - Verifique se o cron está rodando: `docker exec -it controle-siscomex ps aux | grep cron`
 - Verifique os logs do cron: `docker exec -it controle-siscomex tail -f /app/logs/cron.log`
 - Verifique o timezone: `docker exec -it controle-siscomex date`
-
-### Erro de conexão PostgreSQL
-- Verifique as credenciais no Dokploy
-- Verifique se o PostgreSQL está acessível da VPS
-- Teste a conexão: `docker exec -it controle-siscomex python3 -c "from db_manager import db_manager; db_manager.conectar()"`
+- Verifique se o arquivo cron_job.sh está correto: `docker exec -it controle-siscomex cat /etc/cron.d/cron_job`
 
 ### Erro de conexão AWS Athena
-- Verifique as credenciais AWS no Dokploy
+- Verifique as credenciais AWS no Dokploy (AWS_ACCESS_KEY, AWS_SECRET_KEY)
 - Verifique se as credenciais têm permissão para usar Athena
-- Verifique a região configurada
+- Verifique a região configurada (AWS_REGION)
+- Verifique logs: `docker exec -it controle-siscomex env | grep AWS`
 
 ## Manutenção
 
