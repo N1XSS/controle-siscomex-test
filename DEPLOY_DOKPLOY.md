@@ -219,11 +219,31 @@ docker exec -it controle-siscomex /bin/bash
 - Verifique se as variáveis estão configuradas no Dokploy (não precisa de arquivo .env)
 
 ### Erro: "connection to server at ... failed: timeout expired"
-- **Firewall/Rede**: O PostgreSQL pode não estar acessível da VPS
-- Verifique se o firewall permite conexões da VPS para o PostgreSQL
+- **PostgreSQL na mesma VPS**: Se o PostgreSQL está na mesma VPS, você pode estar usando o IP errado
+  - Se PostgreSQL está em container Docker: use o **nome do serviço** ou **IP do container**
+  - Se PostgreSQL está rodando diretamente na VPS: use `host.docker.internal` ou configure `network_mode: host`
+- **PostgreSQL externo**: Verifique se o firewall permite conexões
 - Verifique se o PostgreSQL aceita conexões remotas (postgresql.conf: `listen_addresses = '*'`)
-- Verifique se o pg_hba.conf permite conexões da VPS
-- Teste conectividade: `docker exec -it controle-siscomex nc -zv IP_POSTGRES 5440`
+- Verifique se o pg_hba.conf permite conexões
+- Teste conectividade: `docker exec -it controle-siscomex nc -zv IP_POSTGRES PORTA`
+
+### Como descobrir a configuração correta (PostgreSQL na mesma VPS)
+
+**1. Verificar se PostgreSQL está em container Docker:**
+```bash
+docker ps | grep postgres
+```
+Se retornar um container, note o nome e use como `POSTGRES_HOST`
+
+**2. Se PostgreSQL está em container, descobrir IP:**
+```bash
+docker inspect nome_container_postgres | grep IPAddress
+```
+Use esse IP como `POSTGRES_HOST`
+
+**3. Se PostgreSQL está rodando diretamente na VPS:**
+- Use `host.docker.internal` como `POSTGRES_HOST`
+- Ou configure o container no Dokploy para usar `network_mode: host` (então use `localhost`)
 
 ### Erro: "connection to server on socket ... failed: No such file or directory"
 - **Variáveis não configuradas**: O sistema está tentando conectar via socket local
