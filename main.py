@@ -89,7 +89,10 @@ def executar_script(script_path, args=None):
         cmd.extend(args)
     
     try:
-        result = subprocess.run(cmd, check=False)
+        # Passar explicitamente as variáveis de ambiente do processo atual
+        # Isso garante que os subprocessos herdem as variáveis mesmo quando executado via cron
+        env = os.environ.copy()
+        result = subprocess.run(cmd, check=False, env=env)
         return result.returncode == 0
     except Exception as e:
         print(f"[ERRO] Erro ao executar {script_path}: {e}")
