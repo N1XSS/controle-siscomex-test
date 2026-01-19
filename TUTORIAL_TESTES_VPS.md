@@ -62,7 +62,7 @@ cd /app
 ls -la
 ```
 
-Você deve ver arquivos como: `main.py`, `consulta_sap.py`, `db_manager.py`, etc.
+Você deve ver arquivos como: `src/main.py`, `src/api/athena/client.py`, `src/database/manager.py`, etc.
 
 ---
 
@@ -75,7 +75,7 @@ Este comando mostra quantos dados estão no banco de dados (NFs, DUEs, etc.).
 cd /app
 
 # Executar verificação de status
-python3 main.py --status
+python3 -m src.main --status
 ```
 
 **O que esperar:**
@@ -112,7 +112,7 @@ Para verificar se a conexão com o banco de dados está funcionando:
 cd /app
 
 # Teste rápido de conexão
-python3 -c "from db_manager import db_manager; db_manager.conectar() and print('OK: Conectado!') or print('ERRO: Falha na conexão')"
+python3 -c "from src.database.manager import db_manager; db_manager.conectar() and print('OK: Conectado!') or print('ERRO: Falha na conexão')"
 ```
 
 **O que esperar:**
@@ -129,7 +129,7 @@ Este teste consulta o AWS Athena e salva as NFs no PostgreSQL:
 
 ```bash
 cd /app
-python3 consulta_sap.py
+python3 -m src.api.athena.client
 ```
 
 **O que esperar:**
@@ -147,7 +147,7 @@ Este teste consulta novas DUEs do Siscomex:
 
 ```bash
 cd /app
-python3 main.py --novas
+python3 -m src.main --novas
 ```
 
 **O que esperar:**
@@ -165,7 +165,7 @@ Este teste executa todo o fluxo (consulta SAP + sincronização + atualização)
 
 ```bash
 cd /app
-python3 main.py --completo
+python3 -m src.main --completo
 ```
 
 **O que esperar:**
@@ -192,7 +192,7 @@ cat /etc/cron.d/cron_job
 
 **O que deve aparecer:**
 ```
-0 6 * * * cd /app && /usr/local/bin/python3 main.py --completo >> /app/logs/cron.log 2>&1
+0 6 * * * cd /app && /usr/local/bin/python3 -m src.main --completo >> /app/logs/cron.log 2>&1
 ```
 
 Isso significa: executar todos os dias às 06:00.
@@ -334,7 +334,7 @@ cd /app
 
 # Teste completo de conexão
 python3 << 'EOF'
-from db_manager import db_manager
+from src.database.manager import db_manager
 import sys
 
 print("Testando conexão com PostgreSQL...")
@@ -361,7 +361,7 @@ cd /app
 ls -la
 
 # Ver apenas arquivos Python
-ls -la *.py
+rg --files -g "*.py" src
 ```
 
 ### 7.4. Sair do Container
@@ -378,14 +378,14 @@ Ou pressione `Ctrl + D`
 
 ## 8. Troubleshooting
 
-### 8.1. "python3: can't open file 'main.py'"
+### 8.1. "python3: No module named src"
 
 **Problema:** Você não está no diretório correto.
 
 **Solução:**
 ```bash
 cd /app
-python3 main.py --status
+python3 -m src.main --status
 ```
 
 ### 8.2. "docker: command not found"
@@ -395,10 +395,10 @@ python3 main.py --status
 **Solução:** Quando está dentro do container, execute os comandos diretamente:
 ```bash
 # ERRADO (dentro do container):
-docker exec -it container python3 main.py --status
+docker exec -it container python3 -m src.main --status
 
 # CORRETO (dentro do container):
-python3 main.py --status
+python3 -m src.main --status
 ```
 
 ### 8.3. "Falha ao conectar ao PostgreSQL"
@@ -431,7 +431,7 @@ python3 main.py --status
 Execute manualmente:
 ```bash
 cd /app
-python3 main.py --completo >> /app/logs/cron.log 2>&1
+python3 -m src.main --completo >> /app/logs/cron.log 2>&1
 ```
 
 Depois verifique:
@@ -450,7 +450,7 @@ cat /app/logs/cron.log
 cd /app
 
 # 2. Verificar status
-python3 main.py --status
+python3 -m src.main --status
 
 # 3. Verificar cron
 cat /etc/cron.d/cron_job
@@ -466,13 +466,13 @@ date
 cd /app
 
 # 2. Testar conexão
-python3 -c "from db_manager import db_manager; db_manager.conectar() and print('OK') or print('ERRO')"
+python3 -c "from src.database.manager import db_manager; db_manager.conectar() and print('OK') or print('ERRO')"
 
 # 3. Executar sincronização completa
-python3 main.py --completo
+python3 -m src.main --completo
 
 # 4. Verificar status novamente
-python3 main.py --status
+python3 -m src.main --status
 ```
 
 ### Monitorar Execução
@@ -488,14 +488,14 @@ tail -f /app/logs/cron.log
 
 | Situação | Comando |
 |----------|---------|
-| Ver quantos dados estão no banco | `python3 main.py --status` |
-| Testar se está tudo funcionando | `python3 main.py --completo` |
-| Apenas buscar novas NFs do SAP | `python3 consulta_sap.py` |
-| Apenas sincronizar novas DUEs | `python3 main.py --novas` |
+| Ver quantos dados estão no banco | `python3 -m src.main --status` |
+| Testar se está tudo funcionando | `python3 -m src.main --completo` |
+| Apenas buscar novas NFs do SAP | `python3 -m src.api.athena.client` |
+| Apenas sincronizar novas DUEs | `python3 -m src.main --novas` |
 | Verificar agendamento | `cat /etc/cron.d/cron_job` |
 | Ver logs do cron | `cat /app/logs/cron.log` |
 | Acompanhar logs em tempo real | `tail -f /app/logs/cron.log` |
-| Verificar conexão com banco | `python3 -c "from db_manager import db_manager; db_manager.conectar()"` |
+| Verificar conexão com banco | `python3 -c "from src.database.manager import db_manager; db_manager.conectar()"` |
 
 ---
 
@@ -505,7 +505,7 @@ Após verificar que tudo está funcionando:
 
 1. **Deixe o sistema rodando** - O cron executará automaticamente todos os dias às 06:00
 2. **Monitore os logs** - Verifique periodicamente se está executando corretamente
-3. **Verifique status** - Execute `python3 main.py --status` periodicamente para ver o crescimento dos dados
+3. **Verifique status** - Execute `python3 -m src.main --status` periodicamente para ver o crescimento dos dados
 
 ---
 

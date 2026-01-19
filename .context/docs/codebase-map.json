@@ -1,0 +1,1117 @@
+{
+  "version": "2.0.0",
+  "generated": "2026-01-17T22:01:43.884Z",
+  "updated": "2026-01-18T00:00:00.000Z",
+  "stack": {
+    "primaryLanguage": "python",
+    "languages": [
+      "python"
+    ],
+    "frameworks": [
+      "pytest",
+      "asyncio"
+    ],
+    "buildTools": [
+      "docker",
+      "docker-compose",
+      "pyproject.toml"
+    ],
+    "testFrameworks": [
+      "pytest",
+      "pytest-cov",
+      "pytest-mock"
+    ],
+    "packageManager": "pip",
+    "qualityTools": [
+      "black",
+      "flake8",
+      "mypy",
+      "pre-commit"
+    ],
+    "isMonorepo": false,
+    "hasDocker": true,
+    "hasCI": true,
+    "ciProvider": "github-actions"
+  },
+  "structure": {
+    "totalFiles": 42,
+    "topDirectories": [
+      {
+        "name": "__pycache__",
+        "fileCount": 11
+      },
+      {
+        "name": "config_exemplo.env",
+        "fileCount": 1
+      },
+      {
+        "name": "config.env",
+        "fileCount": 1
+      },
+      {
+        "name": "consulta_sap.py",
+        "fileCount": 1
+      },
+      {
+        "name": "cron_job.sh",
+        "fileCount": 1
+      },
+      {
+        "name": "dados",
+        "fileCount": 0
+      },
+      {
+        "name": "db_manager.py",
+        "fileCount": 1
+      },
+      {
+        "name": "db_schema.py",
+        "fileCount": 1
+      },
+      {
+        "name": "DEPLOY_DOKPLOY.md",
+        "fileCount": 1
+      },
+      {
+        "name": "docker-compose.yml",
+        "fileCount": 1
+      },
+      {
+        "name": "Dockerfile",
+        "fileCount": 1
+      },
+      {
+        "name": "docs",
+        "fileCount": 6
+      },
+      {
+        "name": "download_tabelas.py",
+        "fileCount": 1
+      },
+      {
+        "name": "due_processor.py",
+        "fileCount": 1
+      },
+      {
+        "name": "entrypoint.sh",
+        "fileCount": 1
+      },
+      {
+        "name": "instalar.py",
+        "fileCount": 1
+      },
+      {
+        "name": "LICENSE",
+        "fileCount": 1
+      },
+      {
+        "name": "main.py",
+        "fileCount": 1
+      },
+      {
+        "name": "README.md",
+        "fileCount": 1
+      },
+      {
+        "name": "requirements.txt",
+        "fileCount": 1
+      },
+      {
+        "name": "scripts",
+        "fileCount": 2
+      },
+      {
+        "name": "sync_atualizar.py",
+        "fileCount": 1
+      },
+      {
+        "name": "sync_novas.py",
+        "fileCount": 1
+      },
+      {
+        "name": "test_connection.sh",
+        "fileCount": 1
+      },
+      {
+        "name": "token_cache.pkl",
+        "fileCount": 1
+      },
+      {
+        "name": "token_manager.py",
+        "fileCount": 1
+      },
+      {
+        "name": "TUTORIAL_TESTES_VPS.md",
+        "fileCount": 1
+      }
+    ],
+    "languageDistribution": [
+      {
+        "extension": ".pyc",
+        "count": 11
+      },
+      {
+        "extension": ".py",
+        "count": 10
+      },
+      {
+        "extension": ".md",
+        "count": 9
+      },
+      {
+        "extension": ".sh",
+        "count": 4
+      },
+      {
+        "extension": ".env",
+        "count": 2
+      },
+      {
+        "extension": ".pkl",
+        "count": 1
+      },
+      {
+        "extension": ".txt",
+        "count": 1
+      },
+      {
+        "extension": ".yml",
+        "count": 1
+      },
+      {
+        "extension": ".bat",
+        "count": 1
+      }
+    ]
+  },
+  "architecture": {
+    "layers": [
+      {
+        "name": "Entry Point",
+        "files": ["main.py", "src/main.py"],
+        "description": "Ponto de entrada do sistema - wrapper e orquestrador principal"
+      },
+      {
+        "name": "Core",
+        "files": ["src/core/constants.py", "src/core/logger.py", "src/core/exceptions.py", "src/core/metrics.py"],
+        "description": "Núcleo do sistema - constantes, logging, exceções e métricas"
+      },
+      {
+        "name": "API Clients",
+        "files": ["src/api/siscomex/", "src/api/athena/"],
+        "description": "Clientes de APIs externas - Siscomex e AWS Athena (SAP)"
+      },
+      {
+        "name": "Database Layer",
+        "files": ["src/database/manager.py", "src/database/schema.py"],
+        "description": "Camada de persistência - gerenciador PostgreSQL e schema"
+      },
+      {
+        "name": "Business Logic",
+        "files": ["src/processors/due.py", "src/sync/new_dues.py", "src/sync/update_dues.py"],
+        "description": "Lógica de negócio - processamento, sincronização e atualização"
+      },
+      {
+        "name": "Cache Layer (Optional)",
+        "files": ["src/cache/redis_cache.py"],
+        "description": "Camada de cache opcional - Redis para cache distribuído"
+      },
+      {
+        "name": "Legacy Wrappers",
+        "files": ["consulta_sap.py", "sync_novas.py", "sync_atualizar.py", "due_processor.py", "db_manager.py", "token_manager.py"],
+        "description": "Wrappers legados para retrocompatibilidade"
+      },
+      {
+        "name": "Testing",
+        "files": ["tests/"],
+        "description": "Suite de testes - pytest com cobertura"
+      },
+      {
+        "name": "Infrastructure",
+        "files": ["Dockerfile", "docker-compose.yml", "entrypoint.sh", ".github/workflows/"],
+        "description": "Infraestrutura - containerização e CI/CD"
+      }
+    ],
+    "patterns": [
+      {
+        "name": "Modular Architecture",
+        "description": "Arquitetura modular v2.0 com separação clara de responsabilidades em packages",
+        "files": ["src/"]
+      },
+      {
+        "name": "Singleton",
+        "description": "Token manager usa singleton para gerenciar autenticação e cache de tokens",
+        "files": ["src/api/siscomex/token.py"]
+      },
+      {
+        "name": "Manager Pattern",
+        "description": "DatabaseManager encapsula todas as operações de banco de dados",
+        "files": ["src/database/manager.py"]
+      },
+      {
+        "name": "Facade Pattern",
+        "description": "API wrappers fornecem interfaces simplificadas para APIs externas",
+        "files": ["src/api/siscomex/rest_wrapper.py", "src/api/athena/client.py"]
+      },
+      {
+        "name": "Cache Strategy",
+        "description": "Cache inteligente de vínculos NF-DUE, tokens e opcional Redis",
+        "files": ["src/sync/new_dues.py", "src/api/siscomex/token.py", "src/cache/redis_cache.py"]
+      },
+      {
+        "name": "Optimization Strategy",
+        "description": "Verificação inteligente por dataDeRegistro para evitar requisições desnecessárias",
+        "files": ["src/sync/update_dues.py"]
+      },
+      {
+        "name": "Async Support",
+        "description": "Cliente assíncrono opcional para operações paralelas",
+        "files": ["src/api/siscomex/async_client.py"]
+      },
+      {
+        "name": "Dependency Injection",
+        "description": "Configuração centralizada e injeção de dependências",
+        "files": ["src/core/constants.py"]
+      }
+    ],
+    "entryPoints": [
+      {
+        "file": "main.py",
+        "function": "main",
+        "description": "Wrapper principal - importa de src.main",
+        "usage": "python main.py [--novas|--atualizar|--completo|--status]",
+        "version": "2.0.0"
+      },
+      {
+        "file": "src/main.py",
+        "function": "main",
+        "description": "Ponto de entrada principal v2.0 - menu interativo e CLI completo",
+        "usage": "python -m src.main [--novas|--atualizar|--completo|--status|--atualizar-due|--atualizar-drawback]",
+        "version": "2.0.0"
+      },
+      {
+        "file": "src/sync/new_dues.py",
+        "module": "src.sync.new_dues",
+        "description": "Módulo de sincronização de novas DUEs",
+        "usage": "Importado por main.py ou usado diretamente",
+        "version": "2.0.0"
+      },
+      {
+        "file": "src/sync/update_dues.py",
+        "module": "src.sync.update_dues",
+        "description": "Módulo de atualização de DUEs existentes",
+        "usage": "Importado por main.py ou usado diretamente",
+        "version": "2.0.0"
+      },
+      {
+        "file": "src/processors/due.py",
+        "module": "src.processors.due",
+        "description": "Processador e normalizador de dados DUE",
+        "usage": "Importado por sync modules",
+        "version": "2.0.0"
+      },
+      {
+        "file": "src/scripts/install.py",
+        "module": "src.scripts.install",
+        "description": "Script de instalação e configuração",
+        "usage": "python -m src.scripts.install",
+        "version": "2.0.0"
+      },
+      {
+        "file": "consulta_sap.py",
+        "function": "main",
+        "description": "[LEGACY] Wrapper para src.api.athena.client",
+        "usage": "python consulta_sap.py",
+        "version": "1.x (deprecated)"
+      },
+      {
+        "file": "sync_novas.py",
+        "function": "main",
+        "description": "[LEGACY] Wrapper para src.sync.new_dues",
+        "usage": "python sync_novas.py",
+        "version": "1.x (deprecated)"
+      },
+      {
+        "file": "sync_atualizar.py",
+        "function": "main",
+        "description": "[LEGACY] Wrapper para src.sync.update_dues",
+        "usage": "python sync_atualizar.py",
+        "version": "1.x (deprecated)"
+      }
+    ]
+  },
+  "symbols": {
+    "classes": [
+      {
+        "name": "DatabaseManager",
+        "kind": "class",
+        "file": "db_manager.py",
+        "line": 54,
+        "exported": true
+      },
+      {
+        "name": "SharedTokenManager",
+        "kind": "class",
+        "file": "token_manager.py",
+        "line": 26,
+        "exported": true
+      }
+    ],
+    "interfaces": [],
+    "functions": [
+      {
+        "name": "atualizar_drawback",
+        "kind": "function",
+        "file": "main.py",
+        "line": 239,
+        "exported": true
+      },
+      {
+        "name": "atualizar_due_especifica",
+        "kind": "function",
+        "file": "main.py",
+        "line": 119,
+        "exported": true
+      },
+      {
+        "name": "atualizar_dues",
+        "kind": "function",
+        "file": "sync_atualizar.py",
+        "line": 459,
+        "exported": true
+      },
+      {
+        "name": "atualizar_existentes",
+        "kind": "function",
+        "file": "main.py",
+        "line": 402,
+        "exported": true
+      },
+      {
+        "name": "baixar_tabelas_suporte",
+        "kind": "function",
+        "file": "download_tabelas.py",
+        "line": 311,
+        "exported": true
+      },
+      {
+        "name": "carregar_cache_due_siscomex",
+        "kind": "function",
+        "file": "due_processor.py",
+        "line": 1046,
+        "exported": true
+      },
+      {
+        "name": "carregar_dues_para_verificar",
+        "kind": "function",
+        "file": "sync_atualizar.py",
+        "line": 77,
+        "exported": true
+      },
+      {
+        "name": "carregar_nfs_sap",
+        "kind": "function",
+        "file": "sync_novas.py",
+        "line": 46,
+        "exported": true
+      },
+      {
+        "name": "carregar_vinculos_existentes",
+        "kind": "function",
+        "file": "sync_novas.py",
+        "line": 87,
+        "exported": true
+      },
+      {
+        "name": "consultar_dados_adicionais",
+        "kind": "function",
+        "file": "sync_novas.py",
+        "line": 156,
+        "exported": true
+      },
+      {
+        "name": "consultar_dados_adicionais",
+        "kind": "function",
+        "file": "sync_atualizar.py",
+        "line": 244,
+        "exported": true
+      },
+      {
+        "name": "consultar_dados_tabela",
+        "kind": "function",
+        "file": "download_tabelas.py",
+        "line": 104,
+        "exported": true
+      },
+      {
+        "name": "consultar_due_completa",
+        "kind": "function",
+        "file": "due_processor.py",
+        "line": 579,
+        "exported": true
+      },
+      {
+        "name": "consultar_due_por_nf",
+        "kind": "function",
+        "file": "due_processor.py",
+        "line": 643,
+        "exported": true
+      },
+      {
+        "name": "consultar_due_por_numero",
+        "kind": "function",
+        "file": "due_processor.py",
+        "line": 815,
+        "exported": true
+      },
+      {
+        "name": "consultar_metadados_tabela",
+        "kind": "function",
+        "file": "download_tabelas.py",
+        "line": 63,
+        "exported": true
+      },
+      {
+        "name": "consultar_nfs_exportacao",
+        "kind": "function",
+        "file": "consulta_sap.py",
+        "line": 240,
+        "exported": true
+      },
+      {
+        "name": "criar_cliente_athena",
+        "kind": "function",
+        "file": "consulta_sap.py",
+        "line": 117,
+        "exported": true
+      },
+      {
+        "name": "criar_estrutura_diretorios",
+        "kind": "function",
+        "file": "instalar.py",
+        "line": 34,
+        "exported": true
+      },
+      {
+        "name": "criar_resumo_tabelas_suporte",
+        "kind": "function",
+        "file": "download_tabelas.py",
+        "line": 281,
+        "exported": true
+      },
+      {
+        "name": "executar_query_athena",
+        "kind": "function",
+        "file": "consulta_sap.py",
+        "line": 142,
+        "exported": true
+      },
+      {
+        "name": "executar_script",
+        "kind": "function",
+        "file": "main.py",
+        "line": 85,
+        "exported": true
+      },
+      {
+        "name": "exibir_cabecalho",
+        "kind": "function",
+        "file": "main.py",
+        "line": 38,
+        "exported": true
+      },
+      {
+        "name": "exibir_status",
+        "kind": "function",
+        "file": "main.py",
+        "line": 48,
+        "exported": true
+      },
+      {
+        "name": "gerar_script_agendamento",
+        "kind": "function",
+        "file": "main.py",
+        "line": 434,
+        "exported": true
+      },
+      {
+        "name": "instalar_dependencias",
+        "kind": "function",
+        "file": "instalar.py",
+        "line": 22,
+        "exported": true
+      },
+      {
+        "name": "ler_chaves_nf",
+        "kind": "function",
+        "file": "due_processor.py",
+        "line": 26,
+        "exported": true
+      },
+      {
+        "name": "listar_tabelas_disponivel",
+        "kind": "function",
+        "file": "download_tabelas.py",
+        "line": 22,
+        "exported": true
+      },
+      {
+        "name": "main",
+        "kind": "function",
+        "file": "sync_novas.py",
+        "line": 371,
+        "exported": true
+      },
+      {
+        "name": "main",
+        "kind": "function",
+        "file": "sync_atualizar.py",
+        "line": 700,
+        "exported": true
+      },
+      {
+        "name": "main",
+        "kind": "function",
+        "file": "main.py",
+        "line": 577,
+        "exported": true
+      },
+      {
+        "name": "main",
+        "kind": "function",
+        "file": "instalar.py",
+        "line": 139,
+        "exported": true
+      },
+      {
+        "name": "main",
+        "kind": "function",
+        "file": "due_processor.py",
+        "line": 1495,
+        "exported": true
+      },
+      {
+        "name": "main",
+        "kind": "function",
+        "file": "download_tabelas.py",
+        "line": 452,
+        "exported": true
+      },
+      {
+        "name": "main",
+        "kind": "function",
+        "file": "consulta_sap.py",
+        "line": 330,
+        "exported": true
+      },
+      {
+        "name": "menu_interativo",
+        "kind": "function",
+        "file": "main.py",
+        "line": 541,
+        "exported": true
+      },
+      {
+        "name": "mostrar_proximos_passos",
+        "kind": "function",
+        "file": "instalar.py",
+        "line": 100,
+        "exported": true
+      },
+      {
+        "name": "normalizar_dados_tabela",
+        "kind": "function",
+        "file": "download_tabelas.py",
+        "line": 194,
+        "exported": true
+      },
+      {
+        "name": "processar_chave_individual",
+        "kind": "function",
+        "file": "due_processor.py",
+        "line": 931,
+        "exported": true
+      },
+      {
+        "name": "processar_chaves_nf",
+        "kind": "function",
+        "file": "due_processor.py",
+        "line": 1073,
+        "exported": true
+      },
+      {
+        "name": "processar_dados_due",
+        "kind": "function",
+        "file": "due_processor.py",
+        "line": 52,
+        "exported": true
+      },
+      {
+        "name": "processar_due_averbada_antiga",
+        "kind": "function",
+        "file": "sync_atualizar.py",
+        "line": 280,
+        "exported": true
+      },
+      {
+        "name": "processar_dues_averbadas_antigas_paralelo",
+        "kind": "function",
+        "file": "sync_atualizar.py",
+        "line": 339,
+        "exported": true
+      },
+      {
+        "name": "processar_novas_nfs",
+        "kind": "function",
+        "file": "sync_novas.py",
+        "line": 192,
+        "exported": true
+      },
+      {
+        "name": "processar_sequencial_simples",
+        "kind": "function",
+        "file": "due_processor.py",
+        "line": 1280,
+        "exported": true
+      },
+      {
+        "name": "processar_tabela_individual",
+        "kind": "function",
+        "file": "download_tabelas.py",
+        "line": 161,
+        "exported": true
+      },
+      {
+        "name": "salvar_nfs",
+        "kind": "function",
+        "file": "consulta_sap.py",
+        "line": 296,
+        "exported": true
+      },
+      {
+        "name": "salvar_novos_vinculos",
+        "kind": "function",
+        "file": "sync_novas.py",
+        "line": 107,
+        "exported": true
+      },
+      {
+        "name": "salvar_resultados",
+        "kind": "function",
+        "file": "due_processor.py",
+        "line": 1436,
+        "exported": true
+      },
+      {
+        "name": "salvar_resultados_normalizados",
+        "kind": "function",
+        "file": "due_processor.py",
+        "line": 1314,
+        "exported": true
+      }
+    ],
+    "types": [],
+    "enums": []
+  },
+  "publicAPI": [
+    {
+      "name": "atualizar_drawback",
+      "kind": "function",
+      "file": "main.py",
+      "line": 239,
+      "exported": true
+    },
+    {
+      "name": "atualizar_due_especifica",
+      "kind": "function",
+      "file": "main.py",
+      "line": 119,
+      "exported": true
+    },
+    {
+      "name": "atualizar_dues",
+      "kind": "function",
+      "file": "sync_atualizar.py",
+      "line": 459,
+      "exported": true
+    },
+    {
+      "name": "atualizar_existentes",
+      "kind": "function",
+      "file": "main.py",
+      "line": 402,
+      "exported": true
+    },
+    {
+      "name": "baixar_tabelas_suporte",
+      "kind": "function",
+      "file": "download_tabelas.py",
+      "line": 311,
+      "exported": true
+    },
+    {
+      "name": "carregar_cache_due_siscomex",
+      "kind": "function",
+      "file": "due_processor.py",
+      "line": 1046,
+      "exported": true
+    },
+    {
+      "name": "carregar_dues_para_verificar",
+      "kind": "function",
+      "file": "sync_atualizar.py",
+      "line": 77,
+      "exported": true
+    },
+    {
+      "name": "carregar_nfs_sap",
+      "kind": "function",
+      "file": "sync_novas.py",
+      "line": 46,
+      "exported": true
+    },
+    {
+      "name": "carregar_vinculos_existentes",
+      "kind": "function",
+      "file": "sync_novas.py",
+      "line": 87,
+      "exported": true
+    },
+    {
+      "name": "consultar_dados_adicionais",
+      "kind": "function",
+      "file": "sync_novas.py",
+      "line": 156,
+      "exported": true
+    },
+    {
+      "name": "consultar_dados_adicionais",
+      "kind": "function",
+      "file": "sync_atualizar.py",
+      "line": 244,
+      "exported": true
+    },
+    {
+      "name": "consultar_dados_tabela",
+      "kind": "function",
+      "file": "download_tabelas.py",
+      "line": 104,
+      "exported": true
+    },
+    {
+      "name": "consultar_due_completa",
+      "kind": "function",
+      "file": "due_processor.py",
+      "line": 579,
+      "exported": true
+    },
+    {
+      "name": "consultar_due_por_nf",
+      "kind": "function",
+      "file": "due_processor.py",
+      "line": 643,
+      "exported": true
+    },
+    {
+      "name": "consultar_due_por_numero",
+      "kind": "function",
+      "file": "due_processor.py",
+      "line": 815,
+      "exported": true
+    },
+    {
+      "name": "consultar_metadados_tabela",
+      "kind": "function",
+      "file": "download_tabelas.py",
+      "line": 63,
+      "exported": true
+    },
+    {
+      "name": "consultar_nfs_exportacao",
+      "kind": "function",
+      "file": "consulta_sap.py",
+      "line": 240,
+      "exported": true
+    },
+    {
+      "name": "criar_cliente_athena",
+      "kind": "function",
+      "file": "consulta_sap.py",
+      "line": 117,
+      "exported": true
+    },
+    {
+      "name": "criar_estrutura_diretorios",
+      "kind": "function",
+      "file": "instalar.py",
+      "line": 34,
+      "exported": true
+    },
+    {
+      "name": "criar_resumo_tabelas_suporte",
+      "kind": "function",
+      "file": "download_tabelas.py",
+      "line": 281,
+      "exported": true
+    },
+    {
+      "name": "DatabaseManager",
+      "kind": "class",
+      "file": "db_manager.py",
+      "line": 54,
+      "exported": true
+    },
+    {
+      "name": "executar_query_athena",
+      "kind": "function",
+      "file": "consulta_sap.py",
+      "line": 142,
+      "exported": true
+    },
+    {
+      "name": "executar_script",
+      "kind": "function",
+      "file": "main.py",
+      "line": 85,
+      "exported": true
+    },
+    {
+      "name": "exibir_cabecalho",
+      "kind": "function",
+      "file": "main.py",
+      "line": 38,
+      "exported": true
+    },
+    {
+      "name": "exibir_status",
+      "kind": "function",
+      "file": "main.py",
+      "line": 48,
+      "exported": true
+    },
+    {
+      "name": "gerar_script_agendamento",
+      "kind": "function",
+      "file": "main.py",
+      "line": 434,
+      "exported": true
+    },
+    {
+      "name": "instalar_dependencias",
+      "kind": "function",
+      "file": "instalar.py",
+      "line": 22,
+      "exported": true
+    },
+    {
+      "name": "ler_chaves_nf",
+      "kind": "function",
+      "file": "due_processor.py",
+      "line": 26,
+      "exported": true
+    },
+    {
+      "name": "listar_tabelas_disponivel",
+      "kind": "function",
+      "file": "download_tabelas.py",
+      "line": 22,
+      "exported": true
+    },
+    {
+      "name": "main",
+      "kind": "function",
+      "file": "sync_novas.py",
+      "line": 371,
+      "exported": true
+    },
+    {
+      "name": "main",
+      "kind": "function",
+      "file": "sync_atualizar.py",
+      "line": 700,
+      "exported": true
+    },
+    {
+      "name": "main",
+      "kind": "function",
+      "file": "main.py",
+      "line": 577,
+      "exported": true
+    },
+    {
+      "name": "main",
+      "kind": "function",
+      "file": "instalar.py",
+      "line": 139,
+      "exported": true
+    },
+    {
+      "name": "main",
+      "kind": "function",
+      "file": "due_processor.py",
+      "line": 1495,
+      "exported": true
+    },
+    {
+      "name": "main",
+      "kind": "function",
+      "file": "download_tabelas.py",
+      "line": 452,
+      "exported": true
+    },
+    {
+      "name": "main",
+      "kind": "function",
+      "file": "consulta_sap.py",
+      "line": 330,
+      "exported": true
+    },
+    {
+      "name": "menu_interativo",
+      "kind": "function",
+      "file": "main.py",
+      "line": 541,
+      "exported": true
+    },
+    {
+      "name": "mostrar_proximos_passos",
+      "kind": "function",
+      "file": "instalar.py",
+      "line": 100,
+      "exported": true
+    },
+    {
+      "name": "normalizar_dados_tabela",
+      "kind": "function",
+      "file": "download_tabelas.py",
+      "line": 194,
+      "exported": true
+    },
+    {
+      "name": "processar_chave_individual",
+      "kind": "function",
+      "file": "due_processor.py",
+      "line": 931,
+      "exported": true
+    },
+    {
+      "name": "processar_chaves_nf",
+      "kind": "function",
+      "file": "due_processor.py",
+      "line": 1073,
+      "exported": true
+    },
+    {
+      "name": "processar_dados_due",
+      "kind": "function",
+      "file": "due_processor.py",
+      "line": 52,
+      "exported": true
+    },
+    {
+      "name": "processar_due_averbada_antiga",
+      "kind": "function",
+      "file": "sync_atualizar.py",
+      "line": 280,
+      "exported": true
+    },
+    {
+      "name": "processar_dues_averbadas_antigas_paralelo",
+      "kind": "function",
+      "file": "sync_atualizar.py",
+      "line": 339,
+      "exported": true
+    },
+    {
+      "name": "processar_novas_nfs",
+      "kind": "function",
+      "file": "sync_novas.py",
+      "line": 192,
+      "exported": true
+    },
+    {
+      "name": "processar_sequencial_simples",
+      "kind": "function",
+      "file": "due_processor.py",
+      "line": 1280,
+      "exported": true
+    },
+    {
+      "name": "processar_tabela_individual",
+      "kind": "function",
+      "file": "download_tabelas.py",
+      "line": 161,
+      "exported": true
+    },
+    {
+      "name": "salvar_nfs",
+      "kind": "function",
+      "file": "consulta_sap.py",
+      "line": 296,
+      "exported": true
+    },
+    {
+      "name": "salvar_novos_vinculos",
+      "kind": "function",
+      "file": "sync_novas.py",
+      "line": 107,
+      "exported": true
+    },
+    {
+      "name": "salvar_resultados",
+      "kind": "function",
+      "file": "due_processor.py",
+      "line": 1436,
+      "exported": true
+    }
+  ],
+  "dependencies": {
+    "mostImported": [
+      {
+        "module": "db_manager",
+        "importedBy": ["main.py", "sync_novas.py", "sync_atualizar.py", "due_processor.py", "consulta_sap.py", "download_tabelas.py"],
+        "description": "Gerenciador de banco de dados PostgreSQL - usado em todos os scripts principais"
+      },
+      {
+        "module": "token_manager",
+        "importedBy": ["sync_novas.py", "sync_atualizar.py", "due_processor.py", "main.py"],
+        "description": "Gerenciador de autenticação Siscomex - usado em scripts que consultam a API"
+      },
+      {
+        "module": "due_processor",
+        "importedBy": ["sync_novas.py", "sync_atualizar.py", "main.py"],
+        "description": "Processador de dados DUE - usado para normalizar dados da API"
+      },
+      {
+        "module": "os",
+        "importedBy": ["main.py", "consulta_sap.py", "sync_novas.py", "sync_atualizar.py", "due_processor.py", "db_manager.py", "token_manager.py"],
+        "description": "Biblioteca padrão Python para operações do sistema"
+      },
+      {
+        "module": "psycopg2",
+        "importedBy": ["db_manager.py"],
+        "description": "Driver PostgreSQL para conexão com banco de dados"
+      },
+      {
+        "module": "requests",
+        "importedBy": ["token_manager.py", "due_processor.py"],
+        "description": "Cliente HTTP para requisições à API Siscomex"
+      },
+      {
+        "module": "boto3",
+        "importedBy": ["consulta_sap.py"],
+        "description": "SDK AWS para consultas ao Athena (SAP HANA)"
+      },
+      {
+        "module": "pandas",
+        "importedBy": ["consulta_sap.py", "download_tabelas.py"],
+        "description": "Manipulação e análise de dados"
+      }
+    ]
+  },
+  "stats": {
+    "totalSymbols": 61,
+    "exportedSymbols": 60,
+    "analysisTimeMs": 227
+  }
+}

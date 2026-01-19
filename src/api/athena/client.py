@@ -10,22 +10,27 @@ de exportacao de algodao em pluma (CFOP 7504) de 2 empresas:
 O resultado e salvo no PostgreSQL (tabela nfe_sap) ou exportado para CSV.
 
 Uso:
-    python consulta_sap.py
+    python -m src.api.athena.client
 """
 
-import boto3
-from botocore.exceptions import ClientError, BotoCoreError
-import pandas as pd
-from datetime import datetime
-import warnings
 import os
 import time
+import warnings
+from datetime import datetime
+
+import boto3
+import pandas as pd
+from botocore.exceptions import BotoCoreError, ClientError
+from typing import Any
 from dotenv import load_dotenv
-from db_manager import db_manager
+
+from src.core.constants import ATHENA_DEFAULT_REGION, ATHENA_QUERY_RESULT_LOCATION, ENV_CONFIG_FILE
+from src.database.manager import db_manager
+from src.core.logger import logger
 warnings.filterwarnings('ignore')
 
 # Carregar variáveis de ambiente
-load_dotenv()
+load_dotenv(ENV_CONFIG_FILE)
 
 # Flag para usar PostgreSQL
 USAR_POSTGRESQL = True
@@ -33,11 +38,11 @@ USAR_POSTGRESQL = True
 # Configurações AWS Athena
 AWS_ACCESS_KEY = os.getenv('AWS_ACCESS_KEY')
 AWS_SECRET_KEY = os.getenv('AWS_SECRET_KEY')
-AWS_REGION = os.getenv('AWS_REGION', 'us-east-1')
+AWS_REGION = os.getenv('AWS_REGION', ATHENA_DEFAULT_REGION)
 ATHENA_CATALOG = os.getenv('ATHENA_CATALOG', 'AwsDataCatalog')
 ATHENA_DATABASE = os.getenv('ATHENA_DATABASE', 'default')
 ATHENA_WORKGROUP = os.getenv('ATHENA_WORKGROUP', 'primary')
-S3_OUTPUT_LOCATION = os.getenv('S3_OUTPUT_LOCATION', 's3://locks-query-result/athena_odbc/')
+S3_OUTPUT_LOCATION = os.getenv('S3_OUTPUT_LOCATION', ATHENA_QUERY_RESULT_LOCATION)
 
 # Query SQL - consulta 2 databases para NFs de exportacao de pluma
 QUERY = """
@@ -114,7 +119,7 @@ WHERE nf.canceled = 'N'
 """
 
 
-def criar_cliente_athena():
+def criar_cliente_athena() -> Any:
     """
     Cria e retorna cliente do AWS Athena
     
@@ -123,8 +128,8 @@ def criar_cliente_athena():
     """
     try:
         if not AWS_ACCESS_KEY or not AWS_SECRET_KEY:
-            print("[ERRO] Credenciais AWS nao encontradas nas variaveis de ambiente")
-            print("Configure AWS_ACCESS_KEY e AWS_SECRET_KEY no arquivo .env")
+            logger.error("[ERRO] Credenciais AWS nao encontradas nas variaveis de ambiente")
+            logger.info("Configure AWS_ACCESS_KEY e AWS_SECRET_KEY no arquivo .env")
             return None
         
         cliente = boto3.client(
@@ -135,11 +140,11 @@ def criar_cliente_athena():
         )
         return cliente
     except Exception as e:
-        print(f"[ERRO] Erro ao criar cliente Athena: {e}")
+        logger.error(f"[ERRO] Erro ao criar cliente Athena: {e}")
         return None
 
 
-def executar_query_athena(cliente, query):
+def executar_query_athena(cliente: Any, query: str) -> Any:
     """
     Executa query no AWS Athena e retorna o resultado como DataFrame
     
@@ -151,7 +156,7 @@ def executar_query_athena(cliente, query):
         pd.DataFrame: DataFrame com os resultados ou None em caso de erro
     """
     try:
-        print("Iniciando execucao da query no Athena...")
+        logger.info("Iniciando execucao da query no Athena...")
         
         # Iniciar execução da query
         response = cliente.start_query_execution(
@@ -167,27 +172,27 @@ def executar_query_athena(cliente, query):
         )
         
         query_execution_id = response['QueryExecutionId']
-        print(f"[OK] Query iniciada. Execution ID: {query_execution_id}")
+        logger.info(f"[OK] Query iniciada. Execution ID: {query_execution_id}")
         
         # Aguardar conclusão da query
-        print("Aguardando conclusao da query...")
+        logger.info("Aguardando conclusao da query...")
         while True:
             response = cliente.get_query_execution(QueryExecutionId=query_execution_id)
             status = response['QueryExecution']['Status']['State']
             
             if status in ['SUCCEEDED']:
-                print("[OK] Query executada com sucesso!")
+                logger.info("[OK] Query executada com sucesso!")
                 break
             elif status in ['FAILED', 'CANCELLED']:
                 reason = response['QueryExecution']['Status'].get('StateChangeReason', 'N/A')
-                print(f"[ERRO] Query falhou ou foi cancelada: {reason}")
+                logger.error(f"[ERRO] Query falhou ou foi cancelada: {reason}")
                 return None
             else:
                 # Status: QUEUED, RUNNING
                 time.sleep(1)
         
         # Obter resultados
-        print("Obtendo resultados...")
+        logger.info("Obtendo resultados...")
         resultados = []
         next_token = None
         
@@ -223,21 +228,21 @@ def executar_query_athena(cliente, query):
             df = pd.DataFrame(resultados, columns=colunas)
             return df
         else:
-            print("[AVISO] Nenhum resultado retornado pela query")
+            logger.warning("[AVISO] Nenhum resultado retornado pela query")
             return pd.DataFrame()
         
     except ClientError as e:
-        print(f"[ERRO] Erro do cliente AWS: {e}")
+        logger.error(f"[ERRO] Erro do cliente AWS: {e}")
         return None
     except BotoCoreError as e:
-        print(f"[ERRO] Erro do BotoCore: {e}")
+        logger.error(f"[ERRO] Erro do BotoCore: {e}")
         return None
     except Exception as e:
-        print(f"[ERRO] Erro ao executar query: {e}")
+        logger.error(f"[ERRO] Erro ao executar query: {e}")
         return None
 
 
-def consultar_nfs_exportacao():
+def consultar_nfs_exportacao() -> pd.DataFrame | None:
     """
     Consulta o AWS Athena e retorna DataFrame com as chaves de NF
     de exportacao de algodao em pluma (CFOP 7504).
@@ -246,23 +251,23 @@ def consultar_nfs_exportacao():
         pd.DataFrame: DataFrame com coluna 'keynfe' ou None em caso de erro
     """
     try:
-        print("Conectando ao AWS Athena...")
-        print("-" * 50)
+        logger.info("Conectando ao AWS Athena...")
+        logger.info("-" * 50)
         
         cliente = criar_cliente_athena()
         if not cliente:
             return None
         
-        print("[OK] Cliente Athena criado com sucesso!")
-        print(f"Region: {AWS_REGION}")
-        print(f"Database: {ATHENA_DATABASE}")
-        print(f"Workgroup: {ATHENA_WORKGROUP}")
-        print("-" * 50)
+        logger.info("[OK] Cliente Athena criado com sucesso!")
+        logger.info(f"Region: {AWS_REGION}")
+        logger.info(f"Database: {ATHENA_DATABASE}")
+        logger.info(f"Workgroup: {ATHENA_WORKGROUP}")
+        logger.info("-" * 50)
         
-        print("Executando consulta SQL...")
-        print("Buscando NFs de exportacao de algodao em pluma (CFOP 7504)")
-        print("Databases: AGROPECUARIA, SAMUELMAGGI")
-        print("-" * 50)
+        logger.info("Executando consulta SQL...")
+        logger.info("Buscando NFs de exportacao de algodao em pluma (CFOP 7504)")
+        logger.info("Databases: AGROPECUARIA, SAMUELMAGGI")
+        logger.info("-" * 50)
         
         df = executar_query_athena(cliente, QUERY)
         
@@ -270,7 +275,7 @@ def consultar_nfs_exportacao():
             return None
         
         if df.empty:
-            print("[AVISO] Nenhum resultado encontrado")
+            logger.warning("[AVISO] Nenhum resultado encontrado")
             return df
         
         # Renomear coluna para manter compatibilidade
@@ -282,26 +287,28 @@ def consultar_nfs_exportacao():
         df = df[df['KeyNfe'].str.len() >= 44]
         df = df.drop_duplicates(subset=['KeyNfe'])
         
-        print(f"[OK] Consulta executada com sucesso!")
-        print(f"Total de chaves NF unicas encontradas: {len(df)}")
-        print("-" * 50)
+        logger.info(f"[OK] Consulta executada com sucesso!")
+        logger.info(f"Total de chaves NF unicas encontradas: {len(df)}")
+        logger.info("-" * 50)
         
         return df
         
     except Exception as e:
-        print(f"[ERRO] Erro ao executar consulta: {e}")
+        logger.error(f"[ERRO] Erro ao executar consulta: {e}")
         return None
 
 
-def salvar_nfs(df):
-    """
-    Salva as chaves NF no PostgreSQL
-    
+def salvar_nfs(df: pd.DataFrame | None) -> bool:
+    """Salva chaves NF no PostgreSQL ou CSV.
+
     Args:
-        df: DataFrame com as chaves NF
+        df: DataFrame com chaves NF.
+
+    Returns:
+        True quando a gravacao ocorreu.
     """
     if df is None or df.empty:
-        print("[AVISO] Nao ha dados para salvar.")
+        logger.warning("[AVISO] Nao ha dados para salvar.")
         return False
     
     # Extrair chaves
@@ -311,43 +318,43 @@ def salvar_nfs(df):
     # Conectar ao PostgreSQL
     if not db_manager.conn:
         if not db_manager.conectar():
-            print("[ERRO] Nao foi possivel conectar ao PostgreSQL")
+            logger.error("[ERRO] Nao foi possivel conectar ao PostgreSQL")
             return False
     
     try:
         count = db_manager.inserir_nf_sap(chaves)
         if count > 0:
-            print(f"\n[OK] {count} chaves NF salvas no PostgreSQL")
+            logger.info(f"\n[OK] {count} chaves NF salvas no PostgreSQL")
             return True
         else:
-            print("[AVISO] Nenhuma chave NF foi salva")
+            logger.warning("[AVISO] Nenhuma chave NF foi salva")
             return False
     except Exception as e:
-        print(f"[ERRO] Erro ao salvar no PostgreSQL: {e}")
+        logger.error(f"[ERRO] Erro ao salvar no PostgreSQL: {e}")
         return False
 
 
-def main():
-    """Funcao principal"""
-    print("=" * 60)
-    print("CONSULTA AWS ATHENA - NFS EXPORTACAO PLUMA")
-    print("=" * 60)
-    print(f"Data/Hora: {datetime.now().strftime('%d/%m/%Y %H:%M:%S')}")
-    print("=" * 60)
-    print()
+def main() -> None:
+    """Funcao principal de consulta Athena."""
+    logger.info("=" * 60)
+    logger.info("CONSULTA AWS ATHENA - NFS EXPORTACAO PLUMA")
+    logger.info("=" * 60)
+    logger.info(f"Data/Hora: {datetime.now().strftime('%d/%m/%Y %H:%M:%S')}")
+    logger.info("=" * 60)
+    logger.info("")
     
     # Executa consulta
     df = consultar_nfs_exportacao()
     
     # Salva no PostgreSQL
     if df is not None and not df.empty:
-        print("\n" + "=" * 60)
-        print("Salvando dados no PostgreSQL...")
+        logger.info("\n" + "=" * 60)
+        logger.info("Salvando dados no PostgreSQL...")
         salvar_nfs(df)
     
-    print("\n" + "=" * 60)
-    print("PROCESSO FINALIZADO")
-    print("=" * 60)
+    logger.info("\n" + "=" * 60)
+    logger.info("PROCESSO FINALIZADO")
+    logger.info("=" * 60)
     
     # Desconectar do PostgreSQL
     if db_manager.conn:

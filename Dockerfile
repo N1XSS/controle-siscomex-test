@@ -15,7 +15,7 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 # Copiar código da aplicação
-COPY *.py ./
+COPY src/ ./src/
 
 # Criar diretório para logs e dados (se necessário)
 RUN mkdir -p /app/logs /app/dados

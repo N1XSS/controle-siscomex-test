@@ -21,7 +21,7 @@
 
 #### 2. Verificação Inteligente por `dataDeRegistro` ✅
 
-**Arquivo**: `sync_atualizar.py`
+**Arquivo**: `src/sync/update_dues.py`
 
 **Funcionalidade**:
 - Compara `dataDeRegistro` da API com banco para detectar mudanças
@@ -34,7 +34,7 @@
 
 #### 3. Cache Inteligente de Vinculos NF-DUE ✅
 
-**Arquivo**: `sync_novas.py`
+**Arquivo**: `src/sync/new_dues.py`
 
 **Funcionalidade**:
 - Cache persistente no PostgreSQL
@@ -45,12 +45,12 @@
 
 #### 4. Função Específica para Drawback ✅
 
-**Arquivo**: `main.py`
+**Arquivo**: `src/main.py`
 
 **Comando**:
 ```bash
-python main.py --atualizar-drawback 24BR...,25BR...  # DUEs específicas
-python main.py --atualizar-drawback                  # Todas com atos
+python -m src.main --atualizar-drawback 24BR...,25BR...  # DUEs específicas
+python -m src.main --atualizar-drawback                  # Todas com atos
 ```
 
 **Funcionalidade**:
@@ -62,7 +62,7 @@ python main.py --atualizar-drawback                  # Todas com atos
 
 #### 5. Constantes de Situações ✅
 
-**Arquivo**: `db_manager.py`
+**Arquivo**: `src/database/manager.py`
 
 **Constantes adicionadas**:
 - `SITUACOES_CANCELADAS`: DUEs que nunca mudam
@@ -96,7 +96,7 @@ python main.py --atualizar-drawback                  # Todas com atos
 
 #### 8. Schema Atualizado ✅
 
-**Arquivo**: `db_schema.py`
+**Arquivo**: `src/database/schema.py`
 
 **Alterações**:
 - Documentado 37 tabelas (23 DUE + 14 suporte)
@@ -160,16 +160,16 @@ python main.py --atualizar-drawback                  # Todas com atos
 
 ```
 controle-due-drawback/
-├── main.py                       # CLI principal
-├── sync_novas.py                 # Novas DUEs (cache otimizado)
-├── sync_atualizar.py             # Atualização (verificação inteligente)
-├── due_processor.py              # Processamento
-├── db_manager.py                 # PostgreSQL + constantes
-├── db_schema.py                  # DDL 37 tabelas
-├── token_manager.py              # Autenticação
-├── consulta_sap.py               # SAP HANA
-├── download_tabelas.py           # Tabelas suporte
-├── instalar.py                   # Instalação
+├── src/main.py                       # CLI principal
+├── src/sync/new_dues.py                 # Novas DUEs (cache otimizado)
+├── src/sync/update_dues.py             # Atualização (verificação inteligente)
+├── src/processors/due.py              # Processamento
+├── src/database/manager.py                 # PostgreSQL + constantes
+├── src/database/schema.py                  # DDL 37 tabelas
+├── src/api/siscomex/token.py              # Autenticação
+├── src/api/athena/client.py               # SAP HANA
+├── src/api/siscomex/tabx.py           # Tabelas suporte
+├── src/scripts/install.py                   # Instalação
 │
 ├── scripts/                      # Agendamento
 │   ├── sync_diario.sh

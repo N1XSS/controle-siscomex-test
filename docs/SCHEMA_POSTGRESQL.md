@@ -765,14 +765,14 @@ nfe_sap (N) ── (N) nf_due_vinculo
 Para criar as tabelas manualmente, execute:
 
 ```python
-from db_manager import db_manager
+from src.database.manager import db_manager
 
 if db_manager.conectar():
     db_manager.criar_tabelas(drop_existing=False)  # False para não dropar existentes
     db_manager.desconectar()
 ```
 
-Ou use o arquivo `db_schema.py` diretamente para obter os DDLs SQL.
+Ou use o arquivo `src/database/schema.py` diretamente para obter os DDLs SQL.
 
 ### Migração de Tabelas de Suporte
 
@@ -788,7 +788,7 @@ python db_migrate_support.py
 
 ### Para Migrar para Outro Banco de Dados:
 
-1. **Extrair DDLs**: Use `db_schema.py` que contém todos os CREATE TABLE statements
+1. **Extrair DDLs**: Use `src/database/schema.py` que contém todos os CREATE TABLE statements
 2. **Adaptar Tipos**: 
    - PostgreSQL `SERIAL` → `AUTO_INCREMENT` (MySQL) ou `IDENTITY` (SQL Server)
    - PostgreSQL `VARCHAR(n)` → `NVARCHAR(n)` (SQL Server com Unicode)

@@ -38,14 +38,14 @@ REM 1. Sincronizar novas NFs do SAP e buscar DUEs
 echo.
 echo [FASE 1] Sincronizando novas NFs...
 echo ----------------------------------------------
-%PYTHON% consulta_sap.py
-%PYTHON% sync_novas.py
+%PYTHON% -m src.api.athena.client
+%PYTHON% -m src.sync.new_dues
 
 REM 2. Atualizar DUEs existentes
 echo.
 echo [FASE 2] Atualizando DUEs existentes...
 echo ----------------------------------------------
-%PYTHON% sync_atualizar.py
+%PYTHON% -m src.sync.update_dues
 
 REM Resumo
 echo.

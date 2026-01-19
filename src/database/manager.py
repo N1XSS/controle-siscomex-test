@@ -5,109 +5,187 @@ Sistema DUE - Siscomex
 
 import os
 import time
-import psycopg2
-from psycopg2 import sql
-from psycopg2.extras import execute_values, RealDictCursor
+from contextlib import contextmanager
 from datetime import datetime, timedelta
-from typing import Optional, List, Dict, Any
+from typing import Any, Dict, Generator, List, Optional
+
+import psycopg2
+from psycopg2 import pool, sql
+from psycopg2.extras import RealDictCursor, execute_values
 from dotenv import load_dotenv
 
-from db_schema import ALL_TABLES, DROP_ALL_TABLES
+from src.core.constants import (
+    DB_CONNECTION_TIMEOUT_SEC,
+    ENV_CONFIG_FILE,
+    SITUACOES_AVERBADAS,
+    SITUACOES_CANCELADAS,
+    SITUACOES_PENDENTES,
+)
+from src.database.schema import ALL_TABLES, DROP_ALL_TABLES
+from src.core.logger import logger
 
 # Carregar variáveis de ambiente (arquivo .env se existir, mas não sobrescreve variáveis já definidas)
 # No Docker, as variáveis vêm do ambiente (Dokploy), não de arquivos
-load_dotenv()
-
-
-# =============================================================================
-# CONSTANTES DE SITUACOES
-# =============================================================================
-
-# Situacoes finais - DUEs que NAO mudam mais (nunca atualizar)
-SITUACOES_CANCELADAS = [
-    'CANCELADA_POR_EXPIRACAO_DE_PRAZO',
-    'CANCELADA_PELA_ADUANA_A_PEDIDO_DO_EXPORTADOR',
-    'CANCELADA_PELO_EXPORTADOR',
-    'CANCELADA_PELO_SISCOMEX'
-]
-
-# Situacoes averbadas - podem ter retificacoes (verificar dataDeRegistro)
-SITUACOES_AVERBADAS = [
-    'AVERBADA_SEM_DIVERGENCIA',
-    'AVERBADA_COM_DIVERGENCIA'
-]
-
-# Situacoes pendentes - DUEs em andamento (sempre atualizar)
-SITUACOES_PENDENTES = [
-    'EM_CARGA',
-    'DESEMBARACADA',
-    'AGUARDANDO_AVERBACAO',
-    'EM_ELABORACAO',
-    'REGISTRADA',
-    'PARAMETRIZADA_VERDE',
-    'PARAMETRIZADA_AMARELO',
-    'PARAMETRIZADA_VERMELHO',
-    'INTERROMPIDA'
-]
+load_dotenv(ENV_CONFIG_FILE)
 
 
 class DatabaseManager:
     """Gerenciador de conexao e operacoes com PostgreSQL"""
     
-    def __init__(self):
+    def __init__(self) -> None:
+        self._pool: pool.ThreadedConnectionPool | None = None
         self.conn = None
         self.host = os.getenv('POSTGRES_HOST')
         self.port = os.getenv('POSTGRES_PORT', '5432')
         self.user = os.getenv('POSTGRES_USER')
         self.password = os.getenv('POSTGRES_PASSWORD')
         self.database = os.getenv('POSTGRES_DB')
+
+    def _initialize_pool(self) -> None:
+        """Inicializa o pool de conexoes se necessario."""
+        if self._pool is not None:
+            return
+
+        self._pool = pool.ThreadedConnectionPool(
+            minconn=2,
+            maxconn=10,
+            host=self.host,
+            port=self.port,
+            user=self.user,
+            password=self.password,
+            database=self.database,
+            connect_timeout=DB_CONNECTION_TIMEOUT_SEC,
+        )
+        logger.info("PostgreSQL pool initialized (2-10 connections)")
+
+    @contextmanager
+    def get_connection(self) -> Generator[psycopg2.extensions.connection, None, None]:
+        """Obtém uma conexao do pool com context manager."""
+        if self.conn is not None:
+            yield self.conn
+            return
+
+        self._initialize_pool()
+        conn = self._pool.getconn() if self._pool else None
+        try:
+            if conn is None:
+                raise RuntimeError("Connection pool not initialized")
+            conn.autocommit = False
+            yield conn
+        finally:
+            if conn and self._pool:
+                try:
+                    conn.rollback()
+                except Exception:
+                    pass
+                self._pool.putconn(conn)
+
+    @contextmanager
+    def use_connection(self) -> Generator[psycopg2.extensions.connection, None, None]:
+        """Disponibiliza uma conexao e garante self.conn durante o escopo."""
+        if self.conn is not None:
+            yield self.conn
+            return
+
+        self._initialize_pool()
+        conn = self._pool.getconn() if self._pool else None
+        try:
+            if conn is None:
+                raise RuntimeError("Connection pool not initialized")
+            conn.autocommit = False
+            previous = self.conn
+            self.conn = conn
+            yield conn
+        finally:
+            self.conn = previous
+            if conn and self._pool:
+                try:
+                    conn.rollback()
+                except Exception:
+                    pass
+                self._pool.putconn(conn)
     
     def conectar(self) -> bool:
-        """Estabelece conexao com o banco de dados"""
+        """Estabelece conexao com o banco de dados.
+
+        Returns:
+            True quando a conexao foi estabelecida.
+        """
         try:
-            self.conn = psycopg2.connect(
-                host=self.host,
-                port=self.port,
-                user=self.user,
-                password=self.password,
-                database=self.database,
-                connect_timeout=30
-            )
+            self._initialize_pool()
+            if self.conn is None and self._pool:
+                self.conn = self._pool.getconn()
             self.conn.autocommit = False
-            print(f"[OK] Conectado ao PostgreSQL: {self.host}:{self.port}/{self.database}")
+            logger.info(
+                "Connected to PostgreSQL: %s:%s/%s",
+                self.host,
+                self.port,
+                self.database,
+            )
             return True
         except Exception as e:
-            print(f"[ERRO] Falha ao conectar: {e}")
+            logger.error("Failed to connect to PostgreSQL: %s", e, exc_info=True)
             return False
     
-    def desconectar(self):
-        """Fecha a conexao com o banco"""
+    def desconectar(self) -> None:
+        """Fecha a conexao ou devolve ao pool."""
         if self.conn:
-            self.conn.close()
+            if self._pool:
+                self._pool.putconn(self.conn)
+            else:
+                self.conn.close()
             self.conn = None
-            print("[OK] Conexao fechada")
+            logger.info("PostgreSQL connection released")
+
+    def fechar_pool(self) -> None:
+        """Fecha todas as conexoes do pool."""
+        if self._pool:
+            self._pool.closeall()
+            self._pool = None
+            logger.info("PostgreSQL pool closed")
     
     def executar_query(self, query: str, params: tuple = None, commit: bool = True) -> bool:
-        """Executa uma query SQL"""
+        """Executa uma query SQL.
+
+        Args:
+            query: SQL a executar.
+            params: Parametros opcionais da query.
+            commit: Confirma a transacao quando True.
+
+        Returns:
+            True quando a execucao ocorreu sem erro.
+        """
+        conn = None
         try:
-            with self.conn.cursor() as cur:
-                cur.execute(query, params)
-                if commit:
-                    self.conn.commit()
+            with self.get_connection() as conn:
+                with conn.cursor() as cur:
+                    cur.execute(query, params)
+                    if commit:
+                        conn.commit()
             return True
         except Exception as e:
-            self.conn.rollback()
-            print(f"[ERRO] Erro na query: {e}")
+            if conn:
+                conn.rollback()
+            logger.error("Query failed: %s", e, exc_info=True)
             return False
     
     def executar_query_retorno(self, query: str, params: tuple = None) -> List[Dict]:
-        """Executa uma query SQL e retorna resultados como lista de dicionarios"""
+        """Executa uma query SQL e retorna resultados.
+
+        Args:
+            query: SQL a executar.
+            params: Parametros opcionais da query.
+
+        Returns:
+            Lista de registros em formato dict.
+        """
         try:
-            with self.conn.cursor(cursor_factory=RealDictCursor) as cur:
-                cur.execute(query, params)
-                return [dict(row) for row in cur.fetchall()]
+            with self.get_connection() as conn:
+                with conn.cursor(cursor_factory=RealDictCursor) as cur:
+                    cur.execute(query, params)
+                    return [dict(row) for row in cur.fetchall()]
         except Exception as e:
-            print(f"[ERRO] Erro na query: {e}")
+            logger.error("Query failed: %s", e, exc_info=True)
             return []
     
     # =========================================================================
@@ -115,26 +193,36 @@ class DatabaseManager:
     # =========================================================================
     
     def criar_tabelas(self, drop_existing: bool = False) -> bool:
-        """Cria todas as tabelas do schema"""
+        """Cria todas as tabelas do schema.
+
+        Args:
+            drop_existing: Quando True, remove tabelas antes de recriar.
+
+        Returns:
+            True quando a criacao foi concluida.
+        """
+        conn = None
         try:
-            if drop_existing:
-                print("[INFO] Removendo tabelas existentes...")
-                with self.conn.cursor() as cur:
-                    cur.execute(DROP_ALL_TABLES)
-                self.conn.commit()
-            
-            print(f"[INFO] Criando {len(ALL_TABLES)} tabelas...")
-            for nome, ddl in ALL_TABLES:
-                with self.conn.cursor() as cur:
-                    cur.execute(ddl)
-                print(f"   [OK] {nome}")
-            
-            self.conn.commit()
-            print(f"[OK] {len(ALL_TABLES)} tabelas criadas com sucesso!")
-            return True
+            with self.get_connection() as conn:
+                if drop_existing:
+                    logger.info("Dropping existing tables...")
+                    with conn.cursor() as cur:
+                        cur.execute(DROP_ALL_TABLES)
+                    conn.commit()
+
+                logger.info("Creating %s tables...", len(ALL_TABLES))
+                for nome, ddl in ALL_TABLES:
+                    with conn.cursor() as cur:
+                        cur.execute(ddl)
+                    logger.info("Table created: %s", nome)
+
+                conn.commit()
+                logger.info("%s tables created successfully", len(ALL_TABLES))
+                return True
         except Exception as e:
-            self.conn.rollback()
-            print(f"[ERRO] Erro ao criar tabelas: {e}")
+            if conn:
+                conn.rollback()
+            logger.error("Failed to create tables: %s", e, exc_info=True)
             return False
     
     # =========================================================================
@@ -146,6 +234,7 @@ class DatabaseManager:
         if not chaves_nf:
             return 0
         
+        conn = None
         try:
             query = """
                 INSERT INTO nfe_sap (chave_nf, data_importacao, ativo)
@@ -155,15 +244,17 @@ class DatabaseManager:
                     ativo = TRUE
             """
             dados = [(chave, datetime.now(), True) for chave in chaves_nf]
-            
-            with self.conn.cursor() as cur:
-                execute_values(cur, query, dados)
-            
-            self.conn.commit()
+
+            with self.get_connection() as conn:
+                with conn.cursor() as cur:
+                    execute_values(cur, query, dados)
+
+                conn.commit()
             return len(chaves_nf)
         except Exception as e:
-            self.conn.rollback()
-            print(f"[ERRO] Erro ao inserir NFs SAP: {e}")
+            if conn:
+                conn.rollback()
+            logger.error("Failed to insert SAP NFs: %s", e, exc_info=True)
             return 0
     
     def obter_nfs_sap(self) -> List[str]:
@@ -178,6 +269,7 @@ class DatabaseManager:
     
     def inserir_vinculo_nf_due(self, chave_nf: str, numero_due: str, origem: str = 'SISCOMEX') -> bool:
         """Insere ou atualiza vinculo NF->DUE"""
+        conn = None
         try:
             query = """
                 INSERT INTO nf_due_vinculo (chave_nf, numero_due, data_vinculo, origem)
@@ -187,13 +279,15 @@ class DatabaseManager:
                     data_vinculo = EXCLUDED.data_vinculo,
                     origem = EXCLUDED.origem
             """
-            with self.conn.cursor() as cur:
-                cur.execute(query, (chave_nf, numero_due, datetime.now(), origem))
-            self.conn.commit()
+            with self.get_connection() as conn:
+                with conn.cursor() as cur:
+                    cur.execute(query, (chave_nf, numero_due, datetime.now(), origem))
+                conn.commit()
             return True
         except Exception as e:
-            self.conn.rollback()
-            print(f"[ERRO] Erro ao inserir vinculo: {e}")
+            if conn:
+                conn.rollback()
+            logger.error("Failed to insert NF-DUE link: %s", e, exc_info=True)
             return False
     
     def inserir_vinculos_batch(self, vinculos: List[Dict]) -> int:
@@ -201,6 +295,7 @@ class DatabaseManager:
         if not vinculos:
             return 0
         
+        conn = None
         try:
             query = """
                 INSERT INTO nf_due_vinculo (chave_nf, numero_due, data_vinculo, origem)
@@ -214,15 +309,16 @@ class DatabaseManager:
                 (v['chave_nf'], v['numero_due'], v.get('data_vinculo', datetime.now()), v.get('origem', 'SISCOMEX'))
                 for v in vinculos
             ]
-            
-            with self.conn.cursor() as cur:
-                execute_values(cur, query, dados)
-            
-            self.conn.commit()
+
+            with self.get_connection() as conn:
+                with conn.cursor() as cur:
+                    execute_values(cur, query, dados)
+                conn.commit()
             return len(vinculos)
         except Exception as e:
-            self.conn.rollback()
-            print(f"[ERRO] Erro ao inserir vinculos: {e}")
+            if conn:
+                conn.rollback()
+            logger.error("Failed to insert NF-DUE links: %s", e, exc_info=True)
             return 0
     
     def obter_vinculos(self) -> Dict[str, str]:
@@ -283,12 +379,13 @@ class DatabaseManager:
                 ON CONFLICT (numero) DO UPDATE SET {update_str}
             """
             
-            with self.conn.cursor() as cur:
-                cur.execute(query, valores)
+            with self.get_connection() as conn:
+                with conn.cursor() as cur:
+                    cur.execute(query, valores)
             
             return True
         except Exception as e:
-            print(f"[ERRO] Erro ao inserir DUE principal: {e}")
+            logger.error("Failed to insert DUE principal: %s", e, exc_info=True)
             return False
     
     def obter_dues_desatualizadas(self, horas: int = 24, ignorar_canceladas: bool = True) -> List[str]:
@@ -325,7 +422,14 @@ class DatabaseManager:
         return [r['numero'] for r in result]
     
     def obter_dues_por_situacao(self, situacoes: List[str]) -> List[Dict]:
-        """Retorna DUEs filtradas por situacao"""
+        """Retorna DUEs filtradas por situacao.
+
+        Args:
+            situacoes: Lista de situacoes desejadas.
+
+        Returns:
+            Lista de registros de DUE.
+        """
         query = """
             SELECT numero, situacao, data_de_registro, data_da_averbacao, data_ultima_atualizacao
             FROM due_principal
@@ -357,110 +461,161 @@ class DatabaseManager:
         Insere todos os dados normalizados de uma ou mais DUEs.
         Recebe o dicionario com todas as tabelas como chaves.
         """
+        conn = None
         try:
-            # 1. due_principal
-            if dados_normalizados.get('due_principal'):
-                for registro in dados_normalizados['due_principal']:
-                    self._inserir_due_principal_normalizado(registro)
-            
-            # 2. due_eventos_historico
-            if dados_normalizados.get('due_eventos_historico'):
-                self._inserir_batch_eventos_historico(dados_normalizados['due_eventos_historico'])
-            
-            # 3. due_itens
-            if dados_normalizados.get('due_itens'):
-                self._inserir_batch_itens(dados_normalizados['due_itens'])
-            
-            # 4. due_item_enquadramentos
-            if dados_normalizados.get('due_item_enquadramentos'):
-                self._inserir_batch_generico('due_item_enquadramentos', dados_normalizados['due_item_enquadramentos'])
-            
-            # 5. due_item_paises_destino
-            if dados_normalizados.get('due_item_paises_destino'):
-                self._inserir_batch_generico('due_item_paises_destino', dados_normalizados['due_item_paises_destino'])
-            
-            # 6. due_item_tratamentos_administrativos
-            if dados_normalizados.get('due_item_tratamentos_administrativos'):
-                self._inserir_batch_tratamentos_admin(dados_normalizados['due_item_tratamentos_administrativos'])
-            
-            # 7. due_item_tratamentos_administrativos_orgaos
-            if dados_normalizados.get('due_item_tratamentos_administrativos_orgaos'):
-                self._inserir_batch_generico('due_item_tratamentos_administrativos_orgaos', 
-                                             dados_normalizados['due_item_tratamentos_administrativos_orgaos'])
-            
-            # 8. due_item_notas_remessa
-            if dados_normalizados.get('due_item_notas_remessa'):
-                self._inserir_batch_generico('due_item_notas_remessa', dados_normalizados['due_item_notas_remessa'])
-            
-            # 9. due_item_nota_fiscal_exportacao
-            if dados_normalizados.get('due_item_nota_fiscal_exportacao'):
-                self._inserir_batch_nf_exportacao(dados_normalizados['due_item_nota_fiscal_exportacao'])
-            
-            # 10. due_item_notas_complementares
-            if dados_normalizados.get('due_item_notas_complementares'):
-                self._inserir_batch_generico('due_item_notas_complementares', dados_normalizados['due_item_notas_complementares'])
-            
-            # 11. due_item_atributos
-            if dados_normalizados.get('due_item_atributos'):
-                self._inserir_batch_generico('due_item_atributos', dados_normalizados['due_item_atributos'])
-            
-            # 12. due_item_documentos_importacao
-            if dados_normalizados.get('due_item_documentos_importacao'):
-                self._inserir_batch_generico('due_item_documentos_importacao', dados_normalizados['due_item_documentos_importacao'])
-            
-            # 13. due_item_documentos_transformacao
-            if dados_normalizados.get('due_item_documentos_transformacao'):
-                self._inserir_batch_generico('due_item_documentos_transformacao', dados_normalizados['due_item_documentos_transformacao'])
-            
-            # 14. due_item_calculo_tributario_tratamentos
-            if dados_normalizados.get('due_item_calculo_tributario_tratamentos'):
-                self._inserir_batch_generico('due_item_calculo_tributario_tratamentos', 
-                                             dados_normalizados['due_item_calculo_tributario_tratamentos'])
-            
-            # 15. due_item_calculo_tributario_quadros
-            if dados_normalizados.get('due_item_calculo_tributario_quadros'):
-                self._inserir_batch_generico('due_item_calculo_tributario_quadros', 
-                                             dados_normalizados['due_item_calculo_tributario_quadros'])
-            
-            # 16. due_situacoes_carga
-            if dados_normalizados.get('due_situacoes_carga'):
-                self._inserir_batch_generico('due_situacoes_carga', dados_normalizados['due_situacoes_carga'])
-            
-            # 17. due_solicitacoes
-            if dados_normalizados.get('due_solicitacoes'):
-                self._inserir_batch_generico('due_solicitacoes', dados_normalizados['due_solicitacoes'])
-            
-            # 18-20. Declaracao tributaria
-            for tabela in ['due_declaracao_tributaria_compensacoes', 
-                          'due_declaracao_tributaria_recolhimentos',
-                          'due_declaracao_tributaria_contestacoes']:
-                if dados_normalizados.get(tabela):
-                    self._inserir_batch_generico(tabela, dados_normalizados[tabela])
-            
-            # 21. due_atos_concessorios_suspensao
-            if dados_normalizados.get('due_atos_concessorios_suspensao'):
-                self._inserir_batch_atos_concessorios('due_atos_concessorios_suspensao', 
-                                                      dados_normalizados['due_atos_concessorios_suspensao'])
-            
-            # 22. due_atos_concessorios_isencao
-            if dados_normalizados.get('due_atos_concessorios_isencao'):
-                self._inserir_batch_atos_concessorios('due_atos_concessorios_isencao', 
-                                                      dados_normalizados['due_atos_concessorios_isencao'])
-            
-            # 23. due_exigencias_fiscais
-            if dados_normalizados.get('due_exigencias_fiscais'):
-                self._inserir_batch_generico('due_exigencias_fiscais', 
-                                             dados_normalizados['due_exigencias_fiscais'])
-            
-            self.conn.commit()
-            return True
+            with self.use_connection() as conn:
+                # 1. due_principal
+                if dados_normalizados.get('due_principal'):
+                    for registro in dados_normalizados['due_principal']:
+                        self._inserir_due_principal_normalizado(registro)
+
+                # 2. due_eventos_historico
+                if dados_normalizados.get('due_eventos_historico'):
+                    self._inserir_batch_eventos_historico(dados_normalizados['due_eventos_historico'])
+
+                # 3. due_itens
+                if dados_normalizados.get('due_itens'):
+                    self._inserir_batch_itens(dados_normalizados['due_itens'])
+
+                # 4. due_item_enquadramentos
+                if dados_normalizados.get('due_item_enquadramentos'):
+                    self._inserir_batch_generico(
+                        'due_item_enquadramentos',
+                        dados_normalizados['due_item_enquadramentos'],
+                    )
+
+                # 5. due_item_paises_destino
+                if dados_normalizados.get('due_item_paises_destino'):
+                    self._inserir_batch_generico(
+                        'due_item_paises_destino',
+                        dados_normalizados['due_item_paises_destino'],
+                    )
+
+                # 6. due_item_tratamentos_administrativos
+                if dados_normalizados.get('due_item_tratamentos_administrativos'):
+                    self._inserir_batch_tratamentos_admin(
+                        dados_normalizados['due_item_tratamentos_administrativos'],
+                    )
+
+                # 7. due_item_tratamentos_administrativos_orgaos
+                if dados_normalizados.get('due_item_tratamentos_administrativos_orgaos'):
+                    self._inserir_batch_generico(
+                        'due_item_tratamentos_administrativos_orgaos',
+                        dados_normalizados['due_item_tratamentos_administrativos_orgaos'],
+                    )
+
+                # 8. due_item_notas_remessa
+                if dados_normalizados.get('due_item_notas_remessa'):
+                    self._inserir_batch_generico(
+                        'due_item_notas_remessa',
+                        dados_normalizados['due_item_notas_remessa'],
+                    )
+
+                # 9. due_item_nota_fiscal_exportacao
+                if dados_normalizados.get('due_item_nota_fiscal_exportacao'):
+                    self._inserir_batch_nf_exportacao(
+                        dados_normalizados['due_item_nota_fiscal_exportacao'],
+                    )
+
+                # 10. due_item_notas_complementares
+                if dados_normalizados.get('due_item_notas_complementares'):
+                    self._inserir_batch_generico(
+                        'due_item_notas_complementares',
+                        dados_normalizados['due_item_notas_complementares'],
+                    )
+
+                # 11. due_item_atributos
+                if dados_normalizados.get('due_item_atributos'):
+                    self._inserir_batch_generico(
+                        'due_item_atributos',
+                        dados_normalizados['due_item_atributos'],
+                    )
+
+                # 12. due_item_documentos_importacao
+                if dados_normalizados.get('due_item_documentos_importacao'):
+                    self._inserir_batch_generico(
+                        'due_item_documentos_importacao',
+                        dados_normalizados['due_item_documentos_importacao'],
+                    )
+
+                # 13. due_item_documentos_transformacao
+                if dados_normalizados.get('due_item_documentos_transformacao'):
+                    self._inserir_batch_generico(
+                        'due_item_documentos_transformacao',
+                        dados_normalizados['due_item_documentos_transformacao'],
+                    )
+
+                # 14. due_item_calculo_tributario_tratamentos
+                if dados_normalizados.get('due_item_calculo_tributario_tratamentos'):
+                    self._inserir_batch_generico(
+                        'due_item_calculo_tributario_tratamentos',
+                        dados_normalizados['due_item_calculo_tributario_tratamentos'],
+                    )
+
+                # 15. due_item_calculo_tributario_quadros
+                if dados_normalizados.get('due_item_calculo_tributario_quadros'):
+                    self._inserir_batch_generico(
+                        'due_item_calculo_tributario_quadros',
+                        dados_normalizados['due_item_calculo_tributario_quadros'],
+                    )
+
+                # 16. due_situacoes_carga
+                if dados_normalizados.get('due_situacoes_carga'):
+                    self._inserir_batch_generico(
+                        'due_situacoes_carga',
+                        dados_normalizados['due_situacoes_carga'],
+                    )
+
+                # 17. due_solicitacoes
+                if dados_normalizados.get('due_solicitacoes'):
+                    self._inserir_batch_generico(
+                        'due_solicitacoes',
+                        dados_normalizados['due_solicitacoes'],
+                    )
+
+                # 18-20. Declaracao tributaria
+                for tabela in [
+                    'due_declaracao_tributaria_compensacoes',
+                    'due_declaracao_tributaria_recolhimentos',
+                    'due_declaracao_tributaria_contestacoes',
+                ]:
+                    if dados_normalizados.get(tabela):
+                        self._inserir_batch_generico(
+                            tabela,
+                            dados_normalizados[tabela],
+                        )
+
+                # 21. due_atos_concessorios_suspensao
+                if dados_normalizados.get('due_atos_concessorios_suspensao'):
+                    self._inserir_batch_atos_concessorios(
+                        'due_atos_concessorios_suspensao',
+                        dados_normalizados['due_atos_concessorios_suspensao'],
+                    )
+
+                # 22. due_atos_concessorios_isencao
+                if dados_normalizados.get('due_atos_concessorios_isencao'):
+                    self._inserir_batch_atos_concessorios(
+                        'due_atos_concessorios_isencao',
+                        dados_normalizados['due_atos_concessorios_isencao'],
+                    )
+
+                # 23. due_exigencias_fiscais
+                if dados_normalizados.get('due_exigencias_fiscais'):
+                    self._inserir_batch_generico(
+                        'due_exigencias_fiscais',
+                        dados_normalizados['due_exigencias_fiscais'],
+                    )
+
+                self.conn.commit()
+                return True
             
         except Exception as e:
-            self.conn.rollback()
-            print(f"[ERRO] Erro ao inserir DUE completa: {e}")
+            if conn:
+                conn.rollback()
+            logger.error("Failed to insert full DUE: %s", e, exc_info=True)
             return False
     
-    def _limpar_valor(self, valor, tipo_esperado='string'):
+    def _limpar_valor(self, valor: Any, tipo_esperado: str = 'string') -> Any:
         """Limpa valores vazios e converte para None quando apropriado"""
         if valor is None:
             return None
@@ -474,7 +629,7 @@ class DatabaseManager:
                     return None
         return valor
     
-    def _inserir_due_principal_normalizado(self, registro: Dict):
+    def _inserir_due_principal_normalizado(self, registro: Dict) -> None:
         """Insere registro na due_principal com mapeamento de campos"""
         # Mapeamento de campos do JSON normalizado para colunas do banco
         mapeamento = {
@@ -562,7 +717,7 @@ class DatabaseManager:
         with self.conn.cursor() as cur:
             cur.execute(query, valores)
     
-    def _inserir_batch_eventos_historico(self, registros: List[Dict]):
+    def _inserir_batch_eventos_historico(self, registros: List[Dict]) -> None:
         """Insere eventos do historico (deleta existentes e reinsere)"""
         if not registros:
             return
@@ -603,7 +758,7 @@ class DatabaseManager:
         with self.conn.cursor() as cur:
             execute_values(cur, query, dados)
     
-    def _inserir_batch_itens(self, registros: List[Dict]):
+    def _inserir_batch_itens(self, registros: List[Dict]) -> None:
         """Insere itens da DUE"""
         if not registros:
             return
@@ -678,7 +833,7 @@ class DatabaseManager:
         with self.conn.cursor() as cur:
             execute_values(cur, query, dados)
     
-    def _inserir_batch_tratamentos_admin(self, registros: List[Dict]):
+    def _inserir_batch_tratamentos_admin(self, registros: List[Dict]) -> None:
         """Insere tratamentos administrativos"""
         if not registros:
             return
@@ -719,7 +874,7 @@ class DatabaseManager:
         with self.conn.cursor() as cur:
             execute_values(cur, query, dados)
     
-    def _inserir_batch_nf_exportacao(self, registros: List[Dict]):
+    def _inserir_batch_nf_exportacao(self, registros: List[Dict]) -> None:
         """Insere notas fiscais de exportacao"""
         if not registros:
             return
@@ -790,7 +945,7 @@ class DatabaseManager:
         with self.conn.cursor() as cur:
             execute_values(cur, query, dados)
     
-    def _inserir_batch_generico(self, tabela: str, registros: List[Dict]):
+    def _inserir_batch_generico(self, tabela: str, registros: List[Dict]) -> None:
         """Insere registros de forma generica em tabelas com SERIAL id"""
         if not registros:
             return
@@ -897,41 +1052,53 @@ class DatabaseManager:
     # OPERACOES TABELAS DE SUPORTE
     # =========================================================================
     
-    def inserir_suporte_batch(self, tabela: str, registros: List[Dict], pk_col: str = 'codigo'):
-        """Insere registros em tabela de suporte com upsert"""
+    def inserir_suporte_batch(self, tabela: str, registros: List[Dict], pk_col: str = 'codigo') -> int:
+        """Insere registros em tabela de suporte com upsert.
+
+        Args:
+            tabela: Nome da tabela de suporte.
+            registros: Registros para inserir.
+            pk_col: Coluna de chave primaria.
+
+        Returns:
+            Quantidade inserida.
+        """
         if not registros:
             return 0
         
+        conn = None
         try:
             # Obter colunas do primeiro registro
             colunas = list(registros[0].keys())
-            
+
             # Preparar dados
             dados = [tuple(r.get(col) for col in colunas) for r in registros]
-            
+
             # Construir query com upsert
             colunas_str = ', '.join(colunas)
             placeholders = ', '.join(['%s'] * len(colunas))
             update_parts = [f"{col} = EXCLUDED.{col}" for col in colunas if col != pk_col]
             update_str = ', '.join(update_parts)
-            
+
             query = f"""
                 INSERT INTO {tabela} ({colunas_str})
                 VALUES %s
                 ON CONFLICT ({pk_col}) DO UPDATE SET {update_str}
             """
-            
-            with self.conn.cursor() as cur:
-                execute_values(cur, query, dados)
-            
-            self.conn.commit()
+
+            with self.use_connection() as conn:
+                with self.conn.cursor() as cur:
+                    execute_values(cur, query, dados)
+
+                self.conn.commit()
             return len(registros)
         except Exception as e:
-            self.conn.rollback()
-            print(f"[ERRO] Erro ao inserir em {tabela}: {e}")
+            if conn:
+                conn.rollback()
+            logger.error("Failed to insert into %s: %s", tabela, e, exc_info=True)
             return 0
     
-    def _inserir_batch_atos_concessorios(self, tabela: str, registros: List[Dict]):
+    def _inserir_batch_atos_concessorios(self, tabela: str, registros: List[Dict]) -> None:
         """Insere registros de atos concessórios com mapeamento específico"""
         if not registros:
             return
@@ -997,7 +1164,7 @@ class DatabaseManager:
             self.conn.commit()
         except Exception as e:
             self.conn.rollback()
-            print(f"[ERRO] Erro ao inserir atos concessórios em {tabela}: {e}")
+            logger.error("Failed to insert concession acts into %s: %s", tabela, e, exc_info=True)
             raise
     
     # =========================================================================
@@ -1008,97 +1175,111 @@ class DatabaseManager:
         """
         Atualiza data_ultima_atualizacao para múltiplas DUEs de uma vez.
         Processa em lotes menores para evitar problemas de conexão.
-        
+
         Args:
             numeros_due: Lista de números de DUE para atualizar
-        
+
         Returns:
             Número de DUEs atualizadas
         """
         if not numeros_due:
             return 0
-        
-        # Verificar/reconectar se necessário
+
+        started_with_conn = self.conn is not None
         try:
-            if not self.conn:
-                if not self.conectar():
-                    print("[ERRO] Nao foi possivel conectar ao banco de dados")
-                    return 0
-            # Testar conexão fazendo uma query simples
-            with self.conn.cursor() as cur:
-                cur.execute("SELECT 1")
-        except (psycopg2.InterfaceError, psycopg2.OperationalError):
-            # Conexão fechada ou inválida, reconectar
-            if not self.conectar():
-                print("[ERRO] Nao foi possivel reconectar ao banco de dados")
-                return 0
-        
-        total_atualizado = 0
-        tamanho_lote = 50  # Processar em lotes de 50 para evitar problemas de conexão
-        
-        try:
-            agora = datetime.utcnow().isoformat()
-            
-            # Processar em lotes
-            for i in range(0, len(numeros_due), tamanho_lote):
-                lote = numeros_due[i:i + tamanho_lote]
-                
-                try:
-                    # Verificar conexão antes de cada lote
-                    try:
-                        with self.conn.cursor() as test_cur:
-                            test_cur.execute("SELECT 1")
-                    except (psycopg2.InterfaceError, psycopg2.OperationalError):
-                        # Conexão fechada, reconectar
-                        if not self.conectar():
-                            print(f"[ERRO] Conexao fechada, nao foi possivel reconectar")
-                            break
-                    
-                    query = """
-                        UPDATE due_principal
-                        SET data_ultima_atualizacao = %s
-                        WHERE numero = ANY(%s)
-                    """
-                    
-                    with self.conn.cursor() as cur:
-                        cur.execute(query, (agora, lote))
-                        count = cur.rowcount
-                        total_atualizado += count
-                    
-                    self.conn.commit()
-                    
-                    # Pequeno delay entre lotes para não sobrecarregar o servidor
-                    time.sleep(0.1)
-                    
-                except Exception as e:
-                    # Tentar rollback apenas se conexão ainda estiver aberta
-                    try:
-                        if self.conn:
-                            self.conn.rollback()
-                    except:
-                        pass
-                    
-                    print(f"[ERRO] Erro ao atualizar lote {i//tamanho_lote + 1}: {e}")
-                    # Tentar reconectar para próximo lote
-                    try:
-                        with self.conn.cursor() as test_cur:
-                            test_cur.execute("SELECT 1")
-                    except (psycopg2.InterfaceError, psycopg2.OperationalError):
-                        if not self.conectar():
-                            print("[ERRO] Nao foi possivel reconectar, interrompendo")
-                            break
-            
-            return total_atualizado
-            
-        except Exception as e:
-            # Tentar rollback apenas se conexão ainda estiver aberta
+            # Verificar/reconectar se necessário
             try:
-                if self.conn:
-                    self.conn.rollback()
-            except:
-                pass
-            print(f"[ERRO] Erro ao atualizar data_ultima_atualizacao em batch: {e}")
-            return total_atualizado
+                if not self.conn:
+                    if not self.conectar():
+                        logger.error("Could not connect to database")
+                        return 0
+                # Testar conexão fazendo uma query simples
+                with self.conn.cursor() as cur:
+                    cur.execute("SELECT 1")
+            except (psycopg2.InterfaceError, psycopg2.OperationalError):
+                # Conexão fechada ou inválida, reconectar
+                if not self.conectar():
+                    logger.error("Could not reconnect to database")
+                    return 0
+
+            total_atualizado = 0
+            tamanho_lote = 50  # Processar em lotes de 50 para evitar problemas de conexão
+
+            try:
+                agora = datetime.utcnow().isoformat()
+
+                # Processar em lotes
+                for i in range(0, len(numeros_due), tamanho_lote):
+                    lote = numeros_due[i:i + tamanho_lote]
+
+                    try:
+                        # Verificar conexão antes de cada lote
+                        try:
+                            with self.conn.cursor() as test_cur:
+                                test_cur.execute("SELECT 1")
+                        except (psycopg2.InterfaceError, psycopg2.OperationalError):
+                            # Conexão fechada, reconectar
+                            if not self.conectar():
+                                logger.error("Connection closed, failed to reconnect")
+                                break
+
+                        query = """
+                            UPDATE due_principal
+                            SET data_ultima_atualizacao = %s
+                            WHERE numero = ANY(%s)
+                        """
+
+                        with self.conn.cursor() as cur:
+                            cur.execute(query, (agora, lote))
+                            count = cur.rowcount
+                            total_atualizado += count
+
+                        self.conn.commit()
+
+                        # Pequeno delay entre lotes para não sobrecarregar o servidor
+                        time.sleep(0.1)
+
+                    except Exception as e:
+                        # Tentar rollback apenas se conexão ainda estiver aberta
+                        try:
+                            if self.conn:
+                                self.conn.rollback()
+                        except:
+                            pass
+
+                        logger.error(
+                            "Failed to update batch %s: %s",
+                            i // tamanho_lote + 1,
+                            e,
+                            exc_info=True,
+                        )
+                        # Tentar reconectar para próximo lote
+                        try:
+                            with self.conn.cursor() as test_cur:
+                                test_cur.execute("SELECT 1")
+                        except (psycopg2.InterfaceError, psycopg2.OperationalError):
+                            if not self.conectar():
+                                logger.error("Failed to reconnect, stopping batch update")
+                                break
+
+                return total_atualizado
+
+            except Exception as e:
+                # Tentar rollback apenas se conexão ainda estiver aberta
+                try:
+                    if self.conn:
+                        self.conn.rollback()
+                except:
+                    pass
+                logger.error(
+                    "Failed to update data_ultima_atualizacao in batch: %s",
+                    e,
+                    exc_info=True,
+                )
+                return total_atualizado
+        finally:
+            if not started_with_conn:
+                self.desconectar()
     
     # =========================================================================
     # ESTATISTICAS
@@ -1128,18 +1309,18 @@ db_manager = DatabaseManager()
 
 if __name__ == "__main__":
     # Teste de conexao
-    print("=== Teste do DatabaseManager ===")
+    logger.info("=== DatabaseManager self-test ===")
     
     if db_manager.conectar():
-        print("\n[INFO] Testando criacao de tabelas...")
+        logger.info("Testing table creation...")
         # Nao criar tabelas no teste direto
         # db_manager.criar_tabelas()
         
-        print("\n[INFO] Estatisticas:")
+        logger.info("Statistics:")
         stats = db_manager.obter_estatisticas()
         for tabela, count in stats.items():
-            print(f"   {tabela}: {count} registros")
+            logger.info("%s: %s registros", tabela, count)
         
         db_manager.desconectar()
     else:
-        print("[ERRO] Nao foi possivel conectar ao banco")
+        logger.error("Could not connect to database")

@@ -20,7 +20,7 @@ services:
     
     # Healthcheck (opcional)
     healthcheck:
-      test: ["CMD", "python3", "-c", "from db_manager import db_manager; db_manager.conectar() and db_manager.desconectar()"]
+      test: ["CMD", "python3", "-c", "from src.database.manager import db_manager; db_manager.conectar() and db_manager.desconectar()"]
       interval: 5m
       timeout: 10s
       retries: 3

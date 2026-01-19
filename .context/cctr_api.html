@@ -1,0 +1,2653 @@
+
+<!DOCTYPE html>
+
+<html class="no-js" lang="pt">
+<head>
+<meta charset="utf-8"/>
+<meta content="width=device-width,initial-scale=1" name="viewport"/>
+<link href="http://docs.portalunico.siscomex.gov.br/api/cctr/" rel="canonical"/>
+<link href="../clsf/" rel="prev"/>
+<link href="../../pages/exemplos/cctr/recepcao-assincrona-documento-transporte/" rel="next"/>
+<link href="../../assets/images/favicon.png" rel="icon"/>
+<meta content="mkdocs-1.6.1, mkdocs-material-9.7.1" name="generator"/>
+<title>Documentação da API - API - Portal Único Siscomex</title>
+<link href="../../assets/stylesheets/main.484c7ddc.min.css" rel="stylesheet"/>
+<link href="../../assets/stylesheets/palette.ab4e12ef.min.css" rel="stylesheet"/>
+<link crossorigin="" href="https://fonts.gstatic.com" rel="preconnect"/>
+<link href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&amp;display=fallback" rel="stylesheet"/>
+<style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+<script>__md_scope=new URL("../..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+</head>
+<body data-md-color-accent="indigo" data-md-color-primary="indigo" data-md-color-scheme="default" dir="ltr">
+<input autocomplete="off" class="md-toggle" data-md-toggle="drawer" id="__drawer" type="checkbox"/>
+<input autocomplete="off" class="md-toggle" data-md-toggle="search" id="__search" type="checkbox"/>
+<label class="md-overlay" for="__drawer"></label>
+<div data-md-component="skip">
+<a class="md-skip" href="#controle-de-carga-e-transito-exportacao">
+          Ir para o conteúdo
+        </a>
+</div>
+<div data-md-component="announce">
+</div>
+<header class="md-header md-header--shadow" data-md-component="header">
+<nav aria-label="Cabeçalho" class="md-header__inner md-grid">
+<a aria-label="API - Portal Único Siscomex" class="md-header__button md-logo" data-md-component="logo" href="../.." title="API - Portal Único Siscomex">
+<img alt="logo" src="../../images/docs_logo.png"/>
+</a>
+<label class="md-header__button md-icon" for="__drawer">
+<svg viewbox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"></path></svg>
+</label>
+<div class="md-header__title" data-md-component="header-title">
+<div class="md-header__ellipsis">
+<div class="md-header__topic">
+<span class="md-ellipsis">
+            API - Portal Único Siscomex
+          </span>
+</div>
+<div class="md-header__topic" data-md-component="header-topic">
+<span class="md-ellipsis">
+            
+              Documentação da API
+            
+          </span>
+</div>
+</div>
+</div>
+<label class="md-header__button md-icon" for="__search">
+<svg viewbox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"></path></svg>
+</label>
+<div class="md-search" data-md-component="search" role="dialog">
+<label class="md-search__overlay" for="__search"></label>
+<div class="md-search__inner" role="search">
+<form class="md-search__form" name="search">
+<input aria-label="Buscar" autocapitalize="off" autocomplete="off" autocorrect="off" class="md-search__input" data-md-component="search-query" name="query" placeholder="Buscar" required="" spellcheck="false" type="text"/>
+<label class="md-search__icon md-icon" for="__search">
+<svg viewbox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"></path></svg>
+<svg viewbox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"></path></svg>
+</label>
+<nav aria-label="Pesquisar" class="md-search__options">
+<button aria-label="Limpar" class="md-search__icon md-icon" tabindex="-1" title="Limpar" type="reset">
+<svg viewbox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"></path></svg>
+</button>
+</nav>
+</form>
+<div class="md-search__output">
+<div class="md-search__scrollwrap" data-md-scrollfix="" tabindex="0">
+<div class="md-search-result" data-md-component="search-result">
+<div class="md-search-result__meta">
+            Inicializando a pesquisa
+          </div>
+<ol class="md-search-result__list" role="presentation"></ol>
+</div>
+</div>
+</div>
+</div>
+</div>
+</nav>
+</header>
+<div class="md-container" data-md-component="container">
+<main class="md-main" data-md-component="main">
+<div class="md-main__inner md-grid">
+<div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation">
+<div class="md-sidebar__scrollwrap">
+<div class="md-sidebar__inner">
+<nav aria-label="Navegação" class="md-nav md-nav--primary" data-md-level="0">
+<label class="md-nav__title" for="__drawer">
+<a aria-label="API - Portal Único Siscomex" class="md-nav__button md-logo" data-md-component="logo" href="../.." title="API - Portal Único Siscomex">
+<img alt="logo" src="../../images/docs_logo.png"/>
+</a>
+    API - Portal Único Siscomex
+  </label>
+<ul class="md-nav__list" data-md-scrollfix="">
+<li class="md-nav__item">
+<a class="md-nav__link" href="../..">
+<span class="md-ellipsis">
+    
+  
+    Home
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../../pages/escopo_npi/">
+<span class="md-ellipsis">
+    
+  
+    Escopo
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item md-nav__item--active md-nav__item--nested">
+<input checked="" class="md-nav__toggle md-toggle" id="__nav_3" type="checkbox"/>
+<label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="0">
+<span class="md-ellipsis">
+    
+  
+    API - Pública
+  
+
+    
+  </span>
+<span class="md-nav__icon md-icon"></span>
+</label>
+<nav aria-expanded="true" aria-labelledby="__nav_3_label" class="md-nav" data-md-level="1">
+<label class="md-nav__title" for="__nav_3">
+<span class="md-nav__icon md-icon"></span>
+            
+  
+    API - Pública
+  
+
+          </label>
+<ul class="md-nav__list" data-md-scrollfix="">
+<li class="md-nav__item md-nav__item--nested">
+<input class="md-nav__toggle md-toggle" id="__nav_3_1" type="checkbox"/>
+<label class="md-nav__link" for="__nav_3_1" id="__nav_3_1_label" tabindex="0">
+<span class="md-ellipsis">
+    
+  
+    Aspectos Gerais
+  
+
+    
+  </span>
+<span class="md-nav__icon md-icon"></span>
+</label>
+<nav aria-expanded="false" aria-labelledby="__nav_3_1_label" class="md-nav" data-md-level="2">
+<label class="md-nav__title" for="__nav_3_1">
+<span class="md-nav__icon md-icon"></span>
+            
+  
+    Aspectos Gerais
+  
+
+          </label>
+<ul class="md-nav__list" data-md-scrollfix="">
+<li class="md-nav__item">
+<a class="md-nav__link" href="../../pages/perfis-acesso/">
+<span class="md-ellipsis">
+    
+  
+    Perfis de Acesso
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../../pages/chaves-acesso/">
+<span class="md-ellipsis">
+    
+  
+    Chaves de Acesso
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../../ambientes/">
+<span class="md-ellipsis">
+    
+  
+    Ambientes
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../../pages/limites-acesso/">
+<span class="md-ellipsis">
+    
+  
+    Limites de Acesso
+  
+
+    
+  </span>
+</a>
+</li>
+</ul>
+</nav>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../plat/">
+<span class="md-ellipsis">
+    
+  
+    Autenticação
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../anex/">
+<span class="md-ellipsis">
+    
+  
+    Anexação Eletrônica
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../cada/">
+<span class="md-ellipsis">
+    
+  
+    Cadastro de Atributos
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../catp/">
+<span class="md-ellipsis">
+    
+  
+    Catálogo de Produtos
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../clsf/">
+<span class="md-ellipsis">
+    
+  
+    Classificação Fiscal de Mercadoria
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item md-nav__item--active md-nav__item--nested">
+<input checked="" class="md-nav__toggle md-toggle" id="__nav_3_7" type="checkbox"/>
+<label class="md-nav__link" for="__nav_3_7" id="__nav_3_7_label" tabindex="0">
+<span class="md-ellipsis">
+    
+  
+    Controle de Carga e Trânsito
+  
+
+    
+  </span>
+<span class="md-nav__icon md-icon"></span>
+</label>
+<nav aria-expanded="true" aria-labelledby="__nav_3_7_label" class="md-nav" data-md-level="2">
+<label class="md-nav__title" for="__nav_3_7">
+<span class="md-nav__icon md-icon"></span>
+            
+  
+    Controle de Carga e Trânsito
+  
+
+          </label>
+<ul class="md-nav__list" data-md-scrollfix="">
+<li class="md-nav__item md-nav__item--active md-nav__item--nested">
+<input checked="" class="md-nav__toggle md-toggle" id="__nav_3_7_1" type="checkbox"/>
+<label class="md-nav__link" for="__nav_3_7_1" id="__nav_3_7_1_label" tabindex="0">
+<span class="md-ellipsis">
+    
+  
+    Exportação
+  
+
+    
+  </span>
+<span class="md-nav__icon md-icon"></span>
+</label>
+<nav aria-expanded="true" aria-labelledby="__nav_3_7_1_label" class="md-nav" data-md-level="3">
+<label class="md-nav__title" for="__nav_3_7_1">
+<span class="md-nav__icon md-icon"></span>
+            
+  
+    Exportação
+  
+
+          </label>
+<ul class="md-nav__list" data-md-scrollfix="">
+<li class="md-nav__item md-nav__item--active">
+<input class="md-nav__toggle md-toggle" id="__toc" type="checkbox"/>
+<label class="md-nav__link md-nav__link--active" for="__toc">
+<span class="md-ellipsis">
+    
+  
+    Documentação da API
+  
+
+    
+  </span>
+<span class="md-nav__icon md-icon"></span>
+</label>
+<a class="md-nav__link md-nav__link--active" href="./">
+<span class="md-ellipsis">
+    
+  
+    Documentação da API
+  
+
+    
+  </span>
+</a>
+<nav aria-label="Índice" class="md-nav md-nav--secondary">
+<label class="md-nav__title" for="__toc">
+<span class="md-nav__icon md-icon"></span>
+      Índice
+    </label>
+<ul class="md-nav__list" data-md-component="toc" data-md-scrollfix="">
+<li class="md-nav__item">
+<a class="md-nav__link" href="#movimentacao-de-cargas">
+<span class="md-ellipsis">
+      
+        Movimentação de Cargas
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#recepcao-assincrona">
+<span class="md-ellipsis">
+      
+        Recepção Assíncrona
+      
+    </span>
+</a>
+</li>
+</ul>
+</nav>
+</li>
+<li class="md-nav__item md-nav__item--nested">
+<input class="md-nav__toggle md-toggle" id="__nav_3_7_1_2" type="checkbox"/>
+<label class="md-nav__link" for="__nav_3_7_1_2" id="__nav_3_7_1_2_label" tabindex="0">
+<span class="md-ellipsis">
+    
+  
+    Exemplos Adicionais
+  
+
+    
+  </span>
+<span class="md-nav__icon md-icon"></span>
+</label>
+<nav aria-expanded="false" aria-labelledby="__nav_3_7_1_2_label" class="md-nav" data-md-level="4">
+<label class="md-nav__title" for="__nav_3_7_1_2">
+<span class="md-nav__icon md-icon"></span>
+            
+  
+    Exemplos Adicionais
+  
+
+          </label>
+<ul class="md-nav__list" data-md-scrollfix="">
+<li class="md-nav__item md-nav__item--nested">
+<input class="md-nav__toggle md-toggle" id="__nav_3_7_1_2_1" type="checkbox"/>
+<label class="md-nav__link" for="__nav_3_7_1_2_1" id="__nav_3_7_1_2_1_label" tabindex="0">
+<span class="md-ellipsis">
+    
+  
+    Recepção por MIC/DTA
+  
+
+    
+  </span>
+<span class="md-nav__icon md-icon"></span>
+</label>
+<nav aria-expanded="false" aria-labelledby="__nav_3_7_1_2_1_label" class="md-nav" data-md-level="5">
+<label class="md-nav__title" for="__nav_3_7_1_2_1">
+<span class="md-nav__icon md-icon"></span>
+            
+  
+    Recepção por MIC/DTA
+  
+
+          </label>
+<ul class="md-nav__list" data-md-scrollfix="">
+<li class="md-nav__item">
+<a class="md-nav__link" href="../../pages/exemplos/cctr/recepcao-assincrona-documento-transporte/">
+<span class="md-ellipsis">
+    
+  
+    Recepção de Documento de Transporte
+  
+
+    
+  </span>
+</a>
+</li>
+</ul>
+</nav>
+</li>
+<li class="md-nav__item md-nav__item--nested">
+<input class="md-nav__toggle md-toggle" id="__nav_3_7_1_2_2" type="checkbox"/>
+<label class="md-nav__link" for="__nav_3_7_1_2_2" id="__nav_3_7_1_2_2_label" tabindex="0">
+<span class="md-ellipsis">
+    
+  
+    Recepção por NF-e
+  
+
+    
+  </span>
+<span class="md-nav__icon md-icon"></span>
+</label>
+<nav aria-expanded="false" aria-labelledby="__nav_3_7_1_2_2_label" class="md-nav" data-md-level="5">
+<label class="md-nav__title" for="__nav_3_7_1_2_2">
+<span class="md-nav__icon md-icon"></span>
+            
+  
+    Recepção por NF-e
+  
+
+          </label>
+<ul class="md-nav__list" data-md-scrollfix="">
+<li class="md-nav__item">
+<a class="md-nav__link" href="../../pages/exemplos/cctr/recepcao-assincrona-nfe/">
+<span class="md-ellipsis">
+    
+  
+    Recepção de NF-e Simples
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../../pages/exemplos/cctr/recepcao-assincrona-nfe-conteiner/">
+<span class="md-ellipsis">
+    
+  
+    Recepção de NF-e com Contêiner
+  
+
+    
+  </span>
+</a>
+</li>
+</ul>
+</nav>
+</li>
+<li class="md-nav__item md-nav__item--nested">
+<input class="md-nav__toggle md-toggle" id="__nav_3_7_1_2_3" type="checkbox"/>
+<label class="md-nav__link" for="__nav_3_7_1_2_3" id="__nav_3_7_1_2_3_label" tabindex="0">
+<span class="md-ellipsis">
+    
+  
+    Consulta Protocolo
+  
+
+    
+  </span>
+<span class="md-nav__icon md-icon"></span>
+</label>
+<nav aria-expanded="false" aria-labelledby="__nav_3_7_1_2_3_label" class="md-nav" data-md-level="5">
+<label class="md-nav__title" for="__nav_3_7_1_2_3">
+<span class="md-nav__icon md-icon"></span>
+            
+  
+    Consulta Protocolo
+  
+
+          </label>
+<ul class="md-nav__list" data-md-scrollfix="">
+<li class="md-nav__item">
+<a class="md-nav__link" href="../../pages/exemplos/cctr/consulta-extrato-recepcao/">
+<span class="md-ellipsis">
+    
+  
+    Consulta de Extrato da Recepção
+  
+
+    
+  </span>
+</a>
+</li>
+</ul>
+</nav>
+</li>
+</ul>
+</nav>
+</li>
+</ul>
+</nav>
+</li>
+<li class="md-nav__item md-nav__item--nested">
+<input class="md-nav__toggle md-toggle" id="__nav_3_7_2" type="checkbox"/>
+<label class="md-nav__link" for="__nav_3_7_2" id="__nav_3_7_2_label" tabindex="0">
+<span class="md-ellipsis">
+    
+  
+    Importação
+  
+
+    
+  </span>
+<span class="md-nav__icon md-icon"></span>
+</label>
+<nav aria-expanded="false" aria-labelledby="__nav_3_7_2_label" class="md-nav" data-md-level="3">
+<label class="md-nav__title" for="__nav_3_7_2">
+<span class="md-nav__icon md-icon"></span>
+            
+  
+    Importação
+  
+
+          </label>
+<ul class="md-nav__list" data-md-scrollfix="">
+<li class="md-nav__item md-nav__item--nested">
+<input class="md-nav__toggle md-toggle" id="__nav_3_7_2_1" type="checkbox"/>
+<label class="md-nav__link" for="__nav_3_7_2_1" id="__nav_3_7_2_1_label" tabindex="0">
+<span class="md-ellipsis">
+    
+  
+    Aéreo/Rodoviário
+  
+
+    
+  </span>
+<span class="md-nav__icon md-icon"></span>
+</label>
+<nav aria-expanded="false" aria-labelledby="__nav_3_7_2_1_label" class="md-nav" data-md-level="4">
+<label class="md-nav__title" for="__nav_3_7_2_1">
+<span class="md-nav__icon md-icon"></span>
+            
+  
+    Aéreo/Rodoviário
+  
+
+          </label>
+<ul class="md-nav__list" data-md-scrollfix="">
+<li class="md-nav__item">
+<a class="md-nav__link" href="../ccta/">
+<span class="md-ellipsis">
+    
+  
+    Manifestação Aérea
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../ccta/rodoviario/">
+<span class="md-ellipsis">
+    
+  
+    Manifestação Rodoviária
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../ccta/consultas/">
+<span class="md-ellipsis">
+    
+  
+    Consultas e Operações
+  
+
+    
+  </span>
+</a>
+</li>
+</ul>
+</nav>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="aquaviario/">
+<span class="md-ellipsis">
+    
+  
+    Aquaviário
+  
+
+    
+  </span>
+</a>
+</li>
+</ul>
+</nav>
+</li>
+</ul>
+</nav>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../duex/">
+<span class="md-ellipsis">
+    
+  
+    Declaração Única de Exportação
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item md-nav__item--nested">
+<input class="md-nav__toggle md-toggle" id="__nav_3_9" type="checkbox"/>
+<label class="md-nav__link" for="__nav_3_9" id="__nav_3_9_label" tabindex="0">
+<span class="md-ellipsis">
+    
+  
+    Declaração Única de Importação
+  
+
+    
+  </span>
+<span class="md-nav__icon md-icon"></span>
+</label>
+<nav aria-expanded="false" aria-labelledby="__nav_3_9_label" class="md-nav" data-md-level="2">
+<label class="md-nav__title" for="__nav_3_9">
+<span class="md-nav__icon md-icon"></span>
+            
+  
+    Declaração Única de Importação
+  
+
+          </label>
+<ul class="md-nav__list" data-md-scrollfix="">
+<li class="md-nav__item">
+<a class="md-nav__link" href="../dimp/intervenientes-privados/">
+<span class="md-ellipsis">
+    
+  
+    Intervenientes Privados
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../dimp/receita/">
+<span class="md-ellipsis">
+    
+  
+    Receita Federal
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../dimp/anuentes/">
+<span class="md-ellipsis">
+    
+  
+    Anuentes
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../dimp/secex/">
+<span class="md-ellipsis">
+    
+  
+    Secex
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../dimp/sefaz/">
+<span class="md-ellipsis">
+    
+  
+    Sefaz
+  
+
+    
+  </span>
+</a>
+</li>
+</ul>
+</nav>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../pcce/">
+<span class="md-ellipsis">
+    
+  
+    Pagamento Centralizado
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../rcnt/">
+<span class="md-ellipsis">
+    
+  
+    Recintos Aduaneiros
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item md-nav__item--nested">
+<input class="md-nav__toggle md-toggle" id="__nav_3_12" type="checkbox"/>
+<label class="md-nav__link" for="__nav_3_12" id="__nav_3_12_label" tabindex="0">
+<span class="md-ellipsis">
+    
+  
+    Remessas Internacionais
+  
+
+    
+  </span>
+<span class="md-nav__icon md-icon"></span>
+</label>
+<nav aria-expanded="false" aria-labelledby="__nav_3_12_label" class="md-nav" data-md-level="2">
+<label class="md-nav__title" for="__nav_3_12">
+<span class="md-nav__icon md-icon"></span>
+            
+  
+    Remessas Internacionais
+  
+
+          </label>
+<ul class="md-nav__list" data-md-scrollfix="">
+<li class="md-nav__item">
+<a class="md-nav__link" href="../remx/remx-recepcao/">
+<span class="md-ellipsis">
+    
+  
+    Recepção
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../remx/remx-consulta/">
+<span class="md-ellipsis">
+    
+  
+    Consulta
+  
+
+    
+  </span>
+</a>
+</li>
+</ul>
+</nav>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../tabx/">
+<span class="md-ellipsis">
+    
+  
+    Tabelas Comex
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../talp/">
+<span class="md-ellipsis">
+    
+  
+    Tratamento Administrativo e LPCO
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../ttce/">
+<span class="md-ellipsis">
+    
+  
+    Tratamento Tributário
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item md-nav__item--nested">
+<input class="md-nav__toggle md-toggle" id="__nav_3_16" type="checkbox"/>
+<label class="md-nav__link" for="__nav_3_16" id="__nav_3_16_label" tabindex="0">
+<span class="md-ellipsis">
+    
+  
+    Exemplos Adicionais
+  
+
+    
+  </span>
+<span class="md-nav__icon md-icon"></span>
+</label>
+<nav aria-expanded="false" aria-labelledby="__nav_3_16_label" class="md-nav" data-md-level="2">
+<label class="md-nav__title" for="__nav_3_16">
+<span class="md-nav__icon md-icon"></span>
+            
+  
+    Exemplos Adicionais
+  
+
+          </label>
+<ul class="md-nav__list" data-md-scrollfix="">
+<li class="md-nav__item md-nav__item--nested">
+<input class="md-nav__toggle md-toggle" id="__nav_3_16_1" type="checkbox"/>
+<label class="md-nav__link" for="__nav_3_16_1" id="__nav_3_16_1_label" tabindex="0">
+<span class="md-ellipsis">
+    
+  
+    Anexação Eletrônica
+  
+
+    
+  </span>
+<span class="md-nav__icon md-icon"></span>
+</label>
+<nav aria-expanded="false" aria-labelledby="__nav_3_16_1_label" class="md-nav" data-md-level="3">
+<label class="md-nav__title" for="__nav_3_16_1">
+<span class="md-nav__icon md-icon"></span>
+            
+  
+    Anexação Eletrônica
+  
+
+          </label>
+<ul class="md-nav__list" data-md-scrollfix="">
+<li class="md-nav__item">
+<a class="md-nav__link" href="../../pages/exemplos/anex/anex-documentos-operacao-consultar/">
+<span class="md-ellipsis">
+    
+  
+    Consulta de documentos de uma operação
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../../pages/exemplos/anex/anex-tipos-documento-operacao">
+<span class="md-ellipsis">
+    
+  
+    Consulta de tipos de documentos por tipo de operação
+  
+
+    
+  </span>
+</a>
+</li>
+</ul>
+</nav>
+</li>
+<li class="md-nav__item md-nav__item--nested">
+<input class="md-nav__toggle md-toggle" id="__nav_3_16_2" type="checkbox"/>
+<label class="md-nav__link" for="__nav_3_16_2" id="__nav_3_16_2_label" tabindex="0">
+<span class="md-ellipsis">
+    
+  
+    Controle de Carga e Trânsito Exportação
+  
+
+    
+  </span>
+<span class="md-nav__icon md-icon"></span>
+</label>
+<nav aria-expanded="false" aria-labelledby="__nav_3_16_2_label" class="md-nav" data-md-level="3">
+<label class="md-nav__title" for="__nav_3_16_2">
+<span class="md-nav__icon md-icon"></span>
+            
+  
+    Controle de Carga e Trânsito Exportação
+  
+
+          </label>
+<ul class="md-nav__list" data-md-scrollfix="">
+<li class="md-nav__item">
+<a class="md-nav__link" href="../../pages/exemplos/cctr/consolidar-carga/">
+<span class="md-ellipsis">
+    
+  
+    Consolidação de Carga
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../../pages/exemplos/cctr/consultar-conteiner/">
+<span class="md-ellipsis">
+    
+  
+    Consulta Contêiner
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../../pages/exemplos/cctr/consultar-dat/">
+<span class="md-ellipsis">
+    
+  
+    Consulta DAT
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../../pages/exemplos/cctr/consultar-dtai/">
+<span class="md-ellipsis">
+    
+  
+    Consulta DTAI
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../../pages/exemplos/cctr/consultar-due-ruc/">
+<span class="md-ellipsis">
+    
+  
+    Consulta DU-E, RUC ou RUC Master
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../../pages/exemplos/cctr/consultar-estoque-pre-acd/">
+<span class="md-ellipsis">
+    
+  
+    Consulta Estoque Pré ACD
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../../pages/exemplos/cctr/consultar-estoque-pos-acd/">
+<span class="md-ellipsis">
+    
+  
+    Consulta Estoque Pós ACD
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../../pages/exemplos/cctr/consultar-mic/">
+<span class="md-ellipsis">
+    
+  
+    Consulta MIC
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../../pages/exemplos/cctr/consultar-mruc/">
+<span class="md-ellipsis">
+    
+  
+    Consulta RUC Master
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../../pages/exemplos/cctr/consultar-tif-dta/">
+<span class="md-ellipsis">
+    
+  
+    Consulta TIF-DTA
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../../pages/exemplos/cctr/desunitizar-carga/">
+<span class="md-ellipsis">
+    
+  
+    Desunitização de Carga
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../../pages/exemplos/cctr/entrega-conteiner/">
+<span class="md-ellipsis">
+    
+  
+    Entregas por Contêineres
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../../pages/exemplos/cctr/entrega-documento-transporte/">
+<span class="md-ellipsis">
+    
+  
+    Entregas de Documentos de Transporte
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../../pages/exemplos/cctr/entrega-due-ruc/">
+<span class="md-ellipsis">
+    
+  
+    Entregas de Carga por DU-E/RUC
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../../pages/exemplos/cctr/manifestacao-dados-embarque-pre-acd/">
+<span class="md-ellipsis">
+    
+  
+    Manifestação Dados de Embarque para Exportação de um MIC/DTA Pré-ACD
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../../pages/exemplos/cctr/manifestacao-dados-embarque/">
+<span class="md-ellipsis">
+    
+  
+    Manifestação de dados de Embarque
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../../pages/exemplos/cctr/manifestacao-dat/">
+<span class="md-ellipsis">
+    
+  
+    Manifestação de DAT
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../../pages/exemplos/cctr/recepcao-conteiner/">
+<span class="md-ellipsis">
+    
+  
+    Recepções por Contêineres
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../../pages/exemplos/cctr/recepcao-documento-transporte/">
+<span class="md-ellipsis">
+    
+  
+    Recepções de Documentos de Transporte
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../../pages/exemplos/cctr/recepcao-due-ruc/">
+<span class="md-ellipsis">
+    
+  
+    Recepções de Carga por DU-E/RUC
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../../pages/exemplos/cctr/recepcao-nfe/">
+<span class="md-ellipsis">
+    
+  
+    Recepções de Nota Fiscal Eletrônica
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../../pages/exemplos/cctr/recepcao-nff/">
+<span class="md-ellipsis">
+    
+  
+    Recepções de Nota Fiscal Formulário
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../../pages/exemplos/cctr/unitizar-carga/">
+<span class="md-ellipsis">
+    
+  
+    Unitização de Carga
+  
+
+    
+  </span>
+</a>
+</li>
+</ul>
+</nav>
+</li>
+<li class="md-nav__item md-nav__item--nested">
+<input class="md-nav__toggle md-toggle" id="__nav_3_16_3" type="checkbox"/>
+<label class="md-nav__link" for="__nav_3_16_3" id="__nav_3_16_3_label" tabindex="0">
+<span class="md-ellipsis">
+    
+  
+    Declaração Única de Exportação
+  
+
+    
+  </span>
+<span class="md-nav__icon md-icon"></span>
+</label>
+<nav aria-expanded="false" aria-labelledby="__nav_3_16_3_label" class="md-nav" data-md-level="3">
+<label class="md-nav__title" for="__nav_3_16_3">
+<span class="md-nav__icon md-icon"></span>
+            
+  
+    Declaração Única de Exportação
+  
+
+          </label>
+<ul class="md-nav__list" data-md-scrollfix="">
+<li class="md-nav__item">
+<a class="md-nav__link" href="../../pages/exemplos/duex/registro-retificacao/index.html#registrar-due-com-nfe">
+<span class="md-ellipsis">
+    
+  
+    Registrar DU-E com NF-e
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../../pages/exemplos/duex/registro-retificacao/index.html#registrar-due-com-mais-de-1-nfe">
+<span class="md-ellipsis">
+    
+  
+    Registrar DU-E com mais de 1 NF-e
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../../pages/exemplos/duex/registro-retificacao/index.html#registrar-due-com-nfe-que-possui-mais-de-um-item">
+<span class="md-ellipsis">
+    
+  
+    Registrar DU-E com NF-e que possui mais de um item
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../../pages/exemplos/duex/registro-retificacao/index.html#registrar-due-com-documento-adicionalimportacao-ou-exportacao-vinculado-ao-item-de-due">
+<span class="md-ellipsis">
+    
+  
+    Registrar DU-E com documento adicional(Importação ou Exportação) vinculado ao Item de DU-E
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../../pages/exemplos/duex/registro-retificacao/index.html#pre-registro-du-e">
+<span class="md-ellipsis">
+    
+  
+    Registrar e Retificar DU-E - Ciente da análise de pré-registro
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../../pages/exemplos/duex/registro-retificacao/index.html#du-e-com-nfe-complementar-de-quantidade-e-valor">
+<span class="md-ellipsis">
+    
+  
+    Registrar e retificar DU-E com nota complementar de valor e/ou quantidade
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../../pages/exemplos/duex/registro-retificacao/index.html#du-e-com-atributos">
+<span class="md-ellipsis">
+    
+  
+    Registrar e retificar DU-E com atributos
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../../pages/exemplos/duex/registro-retificacao/index.html#due-com-nfe-possuindo-notas-referenciadas-notas-de-remessa">
+<span class="md-ellipsis">
+    
+  
+    DU-E com NF-e possuindo notas referenciadas (Notas de Remessa)
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../../pages/exemplos/duex/registro-retificacao/index.html#registrar-due-de-embarque-antecipado">
+<span class="md-ellipsis">
+    
+  
+    Registrar DU-E de Embarque Antecipado
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../../pages/exemplos/duex/registro-retificacao/index.html#registrar-due-de-embarque-antecipado-com-mais-itens">
+<span class="md-ellipsis">
+    
+  
+    Registrar DU-E de Embarque Antecipado com mais itens
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../../pages/exemplos/duex/registro-retificacao/index.html#due-com-drawback-suspensao">
+<span class="md-ellipsis">
+    
+  
+    DU-E com Drawback Suspensão
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../../pages/exemplos/duex/registro-retificacao/index.html#due-com-drawback-devolucao">
+<span class="md-ellipsis">
+    
+  
+    DU-E com Drawback Devolução
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../../pages/exemplos/duex/registro-retificacao/index.html#due-com-lpco">
+<span class="md-ellipsis">
+    
+  
+    DU-E com LPCO
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../../pages/exemplos/duex/registro-retificacao/index.html#due-com-depuracao-estatistica">
+<span class="md-ellipsis">
+    
+  
+    DU-E com Depuração Estatística
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../../pages/exemplos/duex/registro-retificacao/index.html#due-com-certificado-de-origem-mercosul-ccptc-ccrom">
+<span class="md-ellipsis">
+    
+  
+    DU-E com Certificado de Origem Mercosul CCPTC/CCROM
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../../pages/exemplos/duex/registro-retificacao/index.html#retificar-due-com-nfe-antes-do-acd">
+<span class="md-ellipsis">
+    
+  
+    Retificar DU-E com NF-e Antes do ACD
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../../pages/exemplos/duex/registro-retificacao/index.html#retificar-due-com-nfe-pos-acd">
+<span class="md-ellipsis">
+    
+  
+    Retificar DU-E com NF-e pós ACD
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../../pages/exemplos/duex/registro-retificacao/index.html#du-e-com-diminuicao-de-valor-e-quantidade">
+<span class="md-ellipsis">
+    
+  
+    Retificar DU-E pós-acd para diminuição de valor e quantidade
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../../pages/exemplos/duex/registro-retificacao/index.html#due-com-tratamento-tributario">
+<span class="md-ellipsis">
+    
+  
+    DU-E com Tratamento Tributário
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../../pages/exemplos/duex/registro-retificacao/index.html#due-com-operacao-consorciada">
+<span class="md-ellipsis">
+    
+  
+    DU-E com Operação Consorciada
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../../pages/exemplos/duex/registro-retificacao/index.html#due-sem-nota-com-detalhamento-de-operacao-diferente-de-embarque-antecipado">
+<span class="md-ellipsis">
+    
+  
+    DU-E sem nota com Detalhamento de Operação diferente de Embarque Antecipado
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../../pages/exemplos/duex/vinculo-drawback-isencao/">
+<span class="md-ellipsis">
+    
+  
+    DU-E com Drawback Isenção - Vincular Ato Concessório após averbação
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../../pages/exemplos/duex/registro-due-sem-nota-completa/">
+<span class="md-ellipsis">
+    
+  
+    DU-E sem Nota Completa
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../../pages/exemplos/duex/mensagens-erro-due/">
+<span class="md-ellipsis">
+    
+  
+    Lista de Mensagens de erros da DU-E
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../../pages/exemplos/duex/mensagens-alerta-due/">
+<span class="md-ellipsis">
+    
+  
+    Lista de Mensagens de alertas da DU-E
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../../pages/exemplos/duex/mensagens-info-due/">
+<span class="md-ellipsis">
+    
+  
+    Lista de Mensagens informativas da DU-E
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../../pages/exemplos/duex/mensagens-erro-da/">
+<span class="md-ellipsis">
+    
+  
+    Lista de Mensagens de erros do Despacho Aduaneiro
+  
+
+    
+  </span>
+</a>
+</li>
+</ul>
+</nav>
+</li>
+<li class="md-nav__item md-nav__item--nested">
+<input class="md-nav__toggle md-toggle" id="__nav_3_16_4" type="checkbox"/>
+<label class="md-nav__link" for="__nav_3_16_4" id="__nav_3_16_4_label" tabindex="0">
+<span class="md-ellipsis">
+    
+  
+    LPCO
+  
+
+    
+  </span>
+<span class="md-nav__icon md-icon"></span>
+</label>
+<nav aria-expanded="false" aria-labelledby="__nav_3_16_4_label" class="md-nav" data-md-level="3">
+<label class="md-nav__title" for="__nav_3_16_4">
+<span class="md-nav__icon md-icon"></span>
+            
+  
+    LPCO
+  
+
+          </label>
+<ul class="md-nav__list" data-md-scrollfix="">
+<li class="md-nav__item">
+<a class="md-nav__link" href="../../pages/exemplos/talp/lpco-exportacao/">
+<span class="md-ellipsis">
+    
+  
+    LPCO de Exportação
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../../pages/exemplos/talp/lpco-importacao/">
+<span class="md-ellipsis">
+    
+  
+    LPCO de Importação
+  
+
+    
+  </span>
+</a>
+</li>
+</ul>
+</nav>
+</li>
+<li class="md-nav__item md-nav__item--nested">
+<input class="md-nav__toggle md-toggle" id="__nav_3_16_5" type="checkbox"/>
+<label class="md-nav__link" for="__nav_3_16_5" id="__nav_3_16_5_label" tabindex="0">
+<span class="md-ellipsis">
+    
+  
+    TTCE
+  
+
+    
+  </span>
+<span class="md-nav__icon md-icon"></span>
+</label>
+<nav aria-expanded="false" aria-labelledby="__nav_3_16_5_label" class="md-nav" data-md-level="3">
+<label class="md-nav__title" for="__nav_3_16_5">
+<span class="md-nav__icon md-icon"></span>
+            
+  
+    TTCE
+  
+
+          </label>
+<ul class="md-nav__list" data-md-scrollfix="">
+<li class="md-nav__item">
+<a class="md-nav__link" href="../../pages/exemplos/ttce/exemplo1/">
+<span class="md-ellipsis">
+    
+  
+    Exemplos adicionais
+  
+
+    
+  </span>
+</a>
+</li>
+</ul>
+</nav>
+</li>
+</ul>
+</nav>
+</li>
+</ul>
+</nav>
+</li>
+<li class="md-nav__item md-nav__item--nested">
+<input class="md-nav__toggle md-toggle" id="__nav_4" type="checkbox"/>
+<label class="md-nav__link" for="__nav_4" id="__nav_4_label" tabindex="0">
+<span class="md-ellipsis">
+    
+  
+    Notificação
+  
+
+    
+  </span>
+<span class="md-nav__icon md-icon"></span>
+</label>
+<nav aria-expanded="false" aria-labelledby="__nav_4_label" class="md-nav" data-md-level="1">
+<label class="md-nav__title" for="__nav_4">
+<span class="md-nav__icon md-icon"></span>
+            
+  
+    Notificação
+  
+
+          </label>
+<ul class="md-nav__list" data-md-scrollfix="">
+<li class="md-nav__item">
+<a class="md-nav__link" href="../../pages/webhooks/">
+<span class="md-ellipsis">
+    
+  
+    Notificação de eventos push
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item md-nav__item--nested">
+<input class="md-nav__toggle md-toggle" id="__nav_4_2" type="checkbox"/>
+<label class="md-nav__link" for="__nav_4_2" id="__nav_4_2_label" tabindex="0">
+<span class="md-ellipsis">
+    
+  
+    Eventos
+  
+
+    
+  </span>
+<span class="md-nav__icon md-icon"></span>
+</label>
+<nav aria-expanded="false" aria-labelledby="__nav_4_2_label" class="md-nav" data-md-level="2">
+<label class="md-nav__title" for="__nav_4_2">
+<span class="md-nav__icon md-icon"></span>
+            
+  
+    Eventos
+  
+
+          </label>
+<ul class="md-nav__list" data-md-scrollfix="">
+<li class="md-nav__item">
+<a class="md-nav__link" href="../../pages/exemplos/anex/anex-eventos-disp-doc/">
+<span class="md-ellipsis">
+    
+  
+    Anexação Eletrônica
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../../pages/prd_produto_eventos/">
+<span class="md-ellipsis">
+    
+  
+    Catálogo de Produtos
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item md-nav__item--nested">
+<input class="md-nav__toggle md-toggle" id="__nav_4_2_3" type="checkbox"/>
+<label class="md-nav__link" for="__nav_4_2_3" id="__nav_4_2_3_label" tabindex="0">
+<span class="md-ellipsis">
+    
+  
+    CCT Exportação
+  
+
+    
+  </span>
+<span class="md-nav__icon md-icon"></span>
+</label>
+<nav aria-expanded="false" aria-labelledby="__nav_4_2_3_label" class="md-nav" data-md-level="3">
+<label class="md-nav__title" for="__nav_4_2_3">
+<span class="md-nav__icon md-icon"></span>
+            
+  
+    CCT Exportação
+  
+
+          </label>
+<ul class="md-nav__list" data-md-scrollfix="">
+<li class="md-nav__item">
+<a class="md-nav__link" href="../../pages/cctr_eventos_depositarios/">
+<span class="md-ellipsis">
+    
+  
+    Movimentação de Cargas
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../../pages/cctr_eventos_recepcao/">
+<span class="md-ellipsis">
+    
+  
+    Recepção Assíncrona
+  
+
+    
+  </span>
+</a>
+</li>
+</ul>
+</nav>
+</li>
+<li class="md-nav__item md-nav__item--nested">
+<input class="md-nav__toggle md-toggle" id="__nav_4_2_4" type="checkbox"/>
+<label class="md-nav__link" for="__nav_4_2_4" id="__nav_4_2_4_label" tabindex="0">
+<span class="md-ellipsis">
+    
+  
+    CCT Importação
+  
+
+    
+  </span>
+<span class="md-nav__icon md-icon"></span>
+</label>
+<nav aria-expanded="false" aria-labelledby="__nav_4_2_4_label" class="md-nav" data-md-level="3">
+<label class="md-nav__title" for="__nav_4_2_4">
+<span class="md-nav__icon md-icon"></span>
+            
+  
+    CCT Importação
+  
+
+          </label>
+<ul class="md-nav__list" data-md-scrollfix="">
+<li class="md-nav__item md-nav__item--nested">
+<input class="md-nav__toggle md-toggle" id="__nav_4_2_4_1" type="checkbox"/>
+<label class="md-nav__link" for="__nav_4_2_4_1" id="__nav_4_2_4_1_label" tabindex="0">
+<span class="md-ellipsis">
+    
+  
+    Modal Aéreo
+  
+
+    
+  </span>
+<span class="md-nav__icon md-icon"></span>
+</label>
+<nav aria-expanded="false" aria-labelledby="__nav_4_2_4_1_label" class="md-nav" data-md-level="4">
+<label class="md-nav__title" for="__nav_4_2_4_1">
+<span class="md-nav__icon md-icon"></span>
+            
+  
+    Modal Aéreo
+  
+
+          </label>
+<ul class="md-nav__list" data-md-scrollfix="">
+<li class="md-nav__item">
+<a class="md-nav__link" href="../../pages/ccta_eventos_agente_carga/">
+<span class="md-ellipsis">
+    
+  
+    Agente de Carga
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../../pages/ccta_eventos_consignatario/">
+<span class="md-ellipsis">
+    
+  
+    Consignatário
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../../pages/ccta_eventos_depositario/">
+<span class="md-ellipsis">
+    
+  
+    Depositário
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../../pages/ccta_eventos_transportador/">
+<span class="md-ellipsis">
+    
+  
+    Transportador
+  
+
+    
+  </span>
+</a>
+</li>
+</ul>
+</nav>
+</li>
+<li class="md-nav__item md-nav__item--nested">
+<input class="md-nav__toggle md-toggle" id="__nav_4_2_4_2" type="checkbox"/>
+<label class="md-nav__link" for="__nav_4_2_4_2" id="__nav_4_2_4_2_label" tabindex="0">
+<span class="md-ellipsis">
+    
+  
+    Modal Rodoviário
+  
+
+    
+  </span>
+<span class="md-nav__icon md-icon"></span>
+</label>
+<nav aria-expanded="false" aria-labelledby="__nav_4_2_4_2_label" class="md-nav" data-md-level="4">
+<label class="md-nav__title" for="__nav_4_2_4_2">
+<span class="md-nav__icon md-icon"></span>
+            
+  
+    Modal Rodoviário
+  
+
+          </label>
+<ul class="md-nav__list" data-md-scrollfix="">
+<li class="md-nav__item">
+<a class="md-nav__link" href="../../pages/ccta_ter_eventos_consignatario/">
+<span class="md-ellipsis">
+    
+  
+    Consignatário
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../../pages/ccta_ter_eventos_depositario/">
+<span class="md-ellipsis">
+    
+  
+    Depositário
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../../pages/ccta_ter_eventos_transportador/">
+<span class="md-ellipsis">
+    
+  
+    Transportador
+  
+
+    
+  </span>
+</a>
+</li>
+</ul>
+</nav>
+</li>
+</ul>
+</nav>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../../pages/duex_eventos/">
+<span class="md-ellipsis">
+    
+  
+    Declaração Única de Exportação
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item md-nav__item--nested">
+<input class="md-nav__toggle md-toggle" id="__nav_4_2_6" type="checkbox"/>
+<label class="md-nav__link" for="__nav_4_2_6" id="__nav_4_2_6_label" tabindex="0">
+<span class="md-ellipsis">
+    
+  
+    Declaração Única de Importação
+  
+
+    
+  </span>
+<span class="md-nav__icon md-icon"></span>
+</label>
+<nav aria-expanded="false" aria-labelledby="__nav_4_2_6_label" class="md-nav" data-md-level="3">
+<label class="md-nav__title" for="__nav_4_2_6">
+<span class="md-nav__icon md-icon"></span>
+            
+  
+    Declaração Única de Importação
+  
+
+          </label>
+<ul class="md-nav__list" data-md-scrollfix="">
+<li class="md-nav__item">
+<a class="md-nav__link" href="../../pages/duimp_eventos_sefaz/">
+<span class="md-ellipsis">
+    
+  
+    Sefaz
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../../pages/duimp_eventos_intervenientes_privados/">
+<span class="md-ellipsis">
+    
+  
+    Intervenientes Privados
+  
+
+    
+  </span>
+</a>
+</li>
+</ul>
+</nav>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../../pages/remx_eventos/">
+<span class="md-ellipsis">
+    
+  
+    Remessas Internacionais
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item md-nav__item--nested">
+<input class="md-nav__toggle md-toggle" id="__nav_4_2_8" type="checkbox"/>
+<label class="md-nav__link" for="__nav_4_2_8" id="__nav_4_2_8_label" tabindex="0">
+<span class="md-ellipsis">
+    
+  
+    Tratamento Administrativo e LPCO
+  
+
+    
+  </span>
+<span class="md-nav__icon md-icon"></span>
+</label>
+<nav aria-expanded="false" aria-labelledby="__nav_4_2_8_label" class="md-nav" data-md-level="3">
+<label class="md-nav__title" for="__nav_4_2_8">
+<span class="md-nav__icon md-icon"></span>
+            
+  
+    Tratamento Administrativo e LPCO
+  
+
+          </label>
+<ul class="md-nav__list" data-md-scrollfix="">
+<li class="md-nav__item">
+<a class="md-nav__link" href="../../pages/lpco_eventos_anuentes/">
+<span class="md-ellipsis">
+    
+  
+    Intervenientes Anuentes
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../../pages/lpco_eventos_intervenientes/">
+<span class="md-ellipsis">
+    
+  
+    Intervenientes Privados
+  
+
+    
+  </span>
+</a>
+</li>
+</ul>
+</nav>
+</li>
+<li class="md-nav__item md-nav__item--nested">
+<input class="md-nav__toggle md-toggle" id="__nav_4_2_9" type="checkbox"/>
+<label class="md-nav__link" for="__nav_4_2_9" id="__nav_4_2_9_label" tabindex="0">
+<span class="md-ellipsis">
+    
+  
+    Pagamento Centralizado
+  
+
+    
+  </span>
+<span class="md-nav__icon md-icon"></span>
+</label>
+<nav aria-expanded="false" aria-labelledby="__nav_4_2_9_label" class="md-nav" data-md-level="3">
+<label class="md-nav__title" for="__nav_4_2_9">
+<span class="md-nav__icon md-icon"></span>
+            
+  
+    Pagamento Centralizado
+  
+
+          </label>
+<ul class="md-nav__list" data-md-scrollfix="">
+<li class="md-nav__item">
+<a class="md-nav__link" href="../../pages/pcce_eventos_anuentes/">
+<span class="md-ellipsis">
+    
+  
+    Intervenientes Anuentes
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../../pages/pcce_eventos_sefaz/">
+<span class="md-ellipsis">
+    
+  
+    Sefaz
+  
+
+    
+  </span>
+</a>
+</li>
+</ul>
+</nav>
+</li>
+</ul>
+</nav>
+</li>
+</ul>
+</nav>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../../pages/sintia/">
+<span class="md-ellipsis">
+    
+  
+    Sintia
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../../pages/tabelas_dominio/">
+<span class="md-ellipsis">
+    
+  
+    Tabelas de domínio
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item md-nav__item--nested">
+<input class="md-nav__toggle md-toggle" id="__nav_7" type="checkbox"/>
+<label class="md-nav__link" for="__nav_7" id="__nav_7_label" tabindex="0">
+<span class="md-ellipsis">
+    
+  
+    Release notes
+  
+
+    
+  </span>
+<span class="md-nav__icon md-icon"></span>
+</label>
+<nav aria-expanded="false" aria-labelledby="__nav_7_label" class="md-nav" data-md-level="1">
+<label class="md-nav__title" for="__nav_7">
+<span class="md-nav__icon md-icon"></span>
+            
+  
+    Release notes
+  
+
+          </label>
+<ul class="md-nav__list" data-md-scrollfix="">
+<li class="md-nav__item">
+<a class="md-nav__link" href="https://docs-proxima.portalunico.siscomex.gov.br/">
+<span class="md-ellipsis">
+    
+  
+    Próxima release ↗ 
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../../rn/r68-zambeze/">
+<span class="md-ellipsis">
+    
+  
+    Release Zambeze
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../../rn/r67-negro/">
+<span class="md-ellipsis">
+    
+  
+    Release Negro/Purus
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../../rn/r61-tocantins/">
+<span class="md-ellipsis">
+    
+  
+    Release Tocantins
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../../rn/r60-inn/">
+<span class="md-ellipsis">
+    
+  
+    Release Inn
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../../rn/r59-volga/">
+<span class="md-ellipsis">
+    
+  
+    Release Volga
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../../rn/r58-hamza/">
+<span class="md-ellipsis">
+    
+  
+    Release Hamza
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../../rn/r55-apa/">
+<span class="md-ellipsis">
+    
+  
+    Release Apa
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../../rn/r52a-paranapanema/">
+<span class="md-ellipsis">
+    
+  
+    Release Paranapanema Afluentes
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../../rn/r51-reno/">
+<span class="md-ellipsis">
+    
+  
+    Release Reno
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../../rn/r49-paracatu/">
+<span class="md-ellipsis">
+    
+  
+    Release Paracatu
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../../rn/r48-capibaribe/">
+<span class="md-ellipsis">
+    
+  
+    Release Capibaribe
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../../rn/r47-congo/">
+<span class="md-ellipsis">
+    
+  
+    Release Congo
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../../rn/r40-spree/">
+<span class="md-ellipsis">
+    
+  
+    Release Spree
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../../rn/r38-torne/">
+<span class="md-ellipsis">
+    
+  
+    Release Torne
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../../rn/r36-guaiba/">
+<span class="md-ellipsis">
+    
+  
+    Release Guaíba
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../../rn/r35-amarelo/">
+<span class="md-ellipsis">
+    
+  
+    Release Amarelo
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../../rn/r34-loire/">
+<span class="md-ellipsis">
+    
+  
+    Release Loire
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../../rn/r32-eufrates/">
+<span class="md-ellipsis">
+    
+  
+    Release Eufrates
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../../rn/r31-saojoao/">
+<span class="md-ellipsis">
+    
+  
+    Release São João
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../../rn/r30-pisom-afluente/">
+<span class="md-ellipsis">
+    
+  
+    Release Pisom Afluente
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../../rn/r30-pisom/">
+<span class="md-ellipsis">
+    
+  
+    Release Pisom
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../../rn/r22-doce/">
+<span class="md-ellipsis">
+    
+  
+    Release Doce
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../../rn/r20-sena/">
+<span class="md-ellipsis">
+    
+  
+    Release Sena
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../../rn/r19-estige/">
+<span class="md-ellipsis">
+    
+  
+    Release Estige
+  
+
+    
+  </span>
+</a>
+</li>
+</ul>
+</nav>
+</li>
+</ul>
+</nav>
+</div>
+</div>
+</div>
+<div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc">
+<div class="md-sidebar__scrollwrap">
+<div class="md-sidebar__inner">
+<nav aria-label="Índice" class="md-nav md-nav--secondary">
+<label class="md-nav__title" for="__toc">
+<span class="md-nav__icon md-icon"></span>
+      Índice
+    </label>
+<ul class="md-nav__list" data-md-component="toc" data-md-scrollfix="">
+<li class="md-nav__item">
+<a class="md-nav__link" href="#movimentacao-de-cargas">
+<span class="md-ellipsis">
+      
+        Movimentação de Cargas
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#recepcao-assincrona">
+<span class="md-ellipsis">
+      
+        Recepção Assíncrona
+      
+    </span>
+</a>
+</li>
+</ul>
+</nav>
+</div>
+</div>
+</div>
+<div class="md-content" data-md-component="content">
+<nav aria-label="Navegação" class="md-path">
+<ol class="md-path__list">
+<li class="md-path__item">
+<a class="md-path__link" href="../..">
+<span class="md-ellipsis">
+    Home
+  </span>
+</a>
+</li>
+<li class="md-path__item">
+<a class="md-path__link" href="../../pages/perfis-acesso/">
+<span class="md-ellipsis">
+    API - Pública
+  </span>
+</a>
+</li>
+<li class="md-path__item">
+<a class="md-path__link" href="./">
+<span class="md-ellipsis">
+    Controle de Carga e Trânsito
+  </span>
+</a>
+</li>
+<li class="md-path__item">
+<a class="md-path__link" href="./">
+<span class="md-ellipsis">
+    Exportação
+  </span>
+</a>
+</li>
+</ol>
+</nav>
+<article class="md-content__inner md-typeset">
+<h1 id="controle-de-carga-e-transito-exportacao">Controle de Carga e Trânsito Exportação</h1>
+<h2 id="movimentacao-de-cargas">Movimentação de Cargas</h2>
+<p><iframe class="swagger-ui-iframe" frameborder="0" id="c03bfa41" src="swagger-c03bfa41.html" style="overflow:hidden;width:100%;" width="100%"></iframe></p>
+<h2 id="recepcao-assincrona">Recepção Assíncrona</h2>
+<p><iframe class="swagger-ui-iframe" frameborder="0" id="6c5fcb77" src="swagger-6c5fcb77.html" style="overflow:hidden;width:100%;" width="100%"></iframe></p>
+</article>
+</div>
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+</div>
+</main>
+<footer class="md-footer">
+<div class="md-footer-meta md-typeset">
+<div class="md-footer-meta__inner md-grid">
+<div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" rel="noopener" target="_blank">
+      Material for MkDocs
+    </a>
+</div>
+</div>
+</div>
+</footer>
+</div>
+<div class="md-dialog" data-md-component="dialog">
+<div class="md-dialog__inner md-typeset"></div>
+</div>
+<script id="__config" type="application/json">{"annotate": null, "base": "../..", "features": ["search.highlight", "navigation.path"], "search": "../../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copiado para \u00e1rea de transfer\u00eancia", "clipboard.copy": "Copiar para \u00e1rea de transfer\u00eancia", "search.result.more.one": "Mais 1 nesta p\u00e1gina", "search.result.more.other": "Mais # nesta p\u00e1gina", "search.result.none": "Nenhum resultado encontrado", "search.result.one": "1 resultado encontrado", "search.result.other": "# resultados encontrados", "search.result.placeholder": "Digite para iniciar a busca", "search.result.term.missing": "Ausente", "select.version": "Selecione a vers\u00e3o"}, "version": null}</script>
+<script src="../../assets/javascripts/bundle.79ae519e.min.js"></script>
+<script src="../../custom.js"></script>
+<script>document$.subscribe(() => {
+            window.update_swagger_ui_iframe_height = function (id) {
+                var iFrameID = document.getElementById(id);
+                if (iFrameID) {
+                    full_height = (iFrameID.contentWindow.document.body.scrollHeight + 80) + "px";
+                    iFrameID.height = full_height;
+                    iFrameID.style.height = full_height;
+                }
+            }
+        
+            let iframe_id_list = []
+            var iframes = document.getElementsByClassName("swagger-ui-iframe");
+            for (var i = 0; i < iframes.length; i++) { 
+                iframe_id_list.push(iframes[i].getAttribute("id"))
+            }
+        
+            let ticking = false;
+            
+            document.addEventListener('scroll', function(e) {
+                if (!ticking) {
+                    window.requestAnimationFrame(()=> {
+                        let half_vh = window.innerHeight/2;
+                        for(var i = 0; i < iframe_id_list.length; i++) {
+                            let element = document.getElementById(iframe_id_list[i])
+                            if(element==null){
+                                return
+                            }
+                            let diff = element.getBoundingClientRect().top
+                            if(element.contentWindow.update_top_val){
+                                element.contentWindow.update_top_val(half_vh - diff)
+                            }
+                        }
+                        ticking = false;
+                    });
+                    ticking = true;
+                }
+            });
+        
+            window.scheme = document.body.getAttribute("data-md-color-scheme")
+            const options = {
+                attributeFilter: ['data-md-color-scheme'],
+            };
+            function color_scheme_callback(mutations) {
+                for (let mutation of mutations) {
+                    if (mutation.attributeName === "data-md-color-scheme") {
+                        scheme = document.body.getAttribute("data-md-color-scheme")
+                        var iframe_list = document.getElementsByClassName("swagger-ui-iframe")
+                        for(var i = 0; i < iframe_list.length; i++) {
+                            var ele = iframe_list.item(i);
+                            if (ele) {
+                                if (scheme === "slate") {
+                                    ele.contentWindow.enable_dark_mode();
+                                } else {
+                                    ele.contentWindow.disable_dark_mode();
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            observer = new MutationObserver(color_scheme_callback);
+            observer.observe(document.body, options);
+            })</script></body>
+</html>

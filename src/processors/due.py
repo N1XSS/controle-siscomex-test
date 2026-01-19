@@ -1,40 +1,45 @@
+import json
 import os
+import threading
+import time
+import warnings
+from typing import Any
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from datetime import datetime, timedelta, timezone
+
 import pandas as pd
 import requests
-import time
-import json
-from datetime import datetime, timedelta
-import warnings
 from dotenv import load_dotenv
-from concurrent.futures import ThreadPoolExecutor, as_completed
-import threading
-from urllib3.util.retry import Retry
 from requests.adapters import HTTPAdapter
-from token_manager import token_manager
-from db_manager import db_manager
+from urllib3.util.retry import Retry
+
+from src.core.constants import DEFAULT_HTTP_TIMEOUT_SEC, ENV_CONFIG_FILE, HTTP_REQUEST_TIMEOUT_SEC
+from src.database.manager import db_manager
+from src.core.logger import logger
+from src.api.siscomex.token import token_manager
 warnings.filterwarnings('ignore')
 
 # Flag para usar PostgreSQL ou CSV
 USAR_POSTGRESQL = True
 
 # Carregar variáveis de ambiente do arquivo .env
-load_dotenv()
+load_dotenv(ENV_CONFIG_FILE)
 
 # Configurações da API Siscomex
 URL_DUE_BASE = "https://portalunico.siscomex.gov.br/due/api/ext/due"
 
-def ler_chaves_nf(arquivo_csv='dados/nfe-sap.csv'):
+def ler_chaves_nf(arquivo_csv: str = 'dados/nfe-sap.csv') -> list[str]:
     """Lê as chaves de NF do CSV gerado pelo SAP"""
     try:
         if not os.path.exists(arquivo_csv):
-            print(f"❌ Arquivo {arquivo_csv} não encontrado")
-            print("Execute primeiro o código de consulta SAP HANA (sap-nf.py)")
+            logger.info(f"❌ Arquivo {arquivo_csv} não encontrado")
+            logger.info("Execute primeiro o código de consulta SAP HANA (sap-nf.py)")
             return []
         
         df = pd.read_csv(arquivo_csv, sep=';', encoding='utf-8-sig')
         
         if 'Chave NF' not in df.columns:
-            print("❌ Coluna 'Chave NF' não encontrada no CSV")
+            logger.info("❌ Coluna 'Chave NF' não encontrada no CSV")
             return []
         
         # Filtrar apenas chaves válidas (não vazias e não nulas)
@@ -42,47 +47,64 @@ def ler_chaves_nf(arquivo_csv='dados/nfe-sap.csv'):
         chaves = chaves[chaves.str.len() > 40]  # Chaves NF têm 44 dígitos
         chaves = chaves.unique().tolist()
         
-        print(f"📋 {len(chaves)} chaves de NF únicas encontradas")
+        logger.info(f"📋 {len(chaves)} chaves de NF únicas encontradas")
         return chaves
         
     except Exception as e:
-        print(f"❌ Erro ao ler CSV: {e}")
+        logger.info(f"❌ Erro ao ler CSV: {e}")
         return []
 
-def processar_dados_due(dados_due, atos_concessorios=None, atos_isencao=None, exigencias_fiscais=None, debug_mode=False):
-    """Processa e normaliza os dados da DUE em estruturas tabulares"""
+def processar_dados_due(
+    dados_due: dict[str, Any],
+    atos_concessorios: list[dict[str, Any]] | None = None,
+    atos_isencao: list[dict[str, Any]] | None = None,
+    exigencias_fiscais: list[dict[str, Any]] | None = None,
+    debug_mode: bool = False,
+) -> dict[str, list[dict[str, Any]]] | None:
+    """Processa e normaliza os dados da DUE.
+
+    Args:
+        dados_due: Payload completo da DUE.
+        atos_concessorios: Lista de atos concessorios de suspensao.
+        atos_isencao: Lista de atos concessorios de isencao.
+        exigencias_fiscais: Lista de exigencias fiscais.
+        debug_mode: Quando True, loga detalhes adicionais.
+
+    Returns:
+        Estrutura normalizada por tabela ou None em caso de erro.
+    """
     
     # Verificação inicial dos dados
     if not dados_due or not isinstance(dados_due, dict):
         if debug_mode:
-            print(f"⚠️  Dados DUE inválidos ou vazios: {type(dados_due)}")
+            logger.info(f"⚠️  Dados DUE inválidos ou vazios: {type(dados_due)}")
         return None
     
     numero_due = dados_due.get('numero', '')
     if not numero_due:
         if debug_mode:
-            print(f"⚠️  Número da DUE não encontrado nos dados")
+            logger.info(f"⚠️  Número da DUE não encontrado nos dados")
         return None
     
     # Debug: mostrar estrutura dos dados recebidos
     if debug_mode:
-        print(f"🔍 Processando DUE {numero_due}:")
-        print(f"   • Campos principais: {list(dados_due.keys())}")
-        print(f"   • Eventos histórico: {len(dados_due.get('eventosDoHistorico', []))}")
-        print(f"   • Itens: {len(dados_due.get('itens', []))}")
-        print(f"   • Situações carga: {len(dados_due.get('situacoesDaCarga', []))}")
-        print(f"   • Solicitações: {len(dados_due.get('solicitacoes', []))}")
-        print(f"   • Declaração tributária: {'declaracaoTributaria' in dados_due}")
+        logger.info(f"🔍 Processando DUE {numero_due}:")
+        logger.info(f"   • Campos principais: {list(dados_due.keys())}")
+        logger.info(f"   • Eventos histórico: {len(dados_due.get('eventosDoHistorico', []))}")
+        logger.info(f"   • Itens: {len(dados_due.get('itens', []))}")
+        logger.info(f"   • Situações carga: {len(dados_due.get('situacoesDaCarga', []))}")
+        logger.info(f"   • Solicitações: {len(dados_due.get('solicitacoes', []))}")
+        logger.info(f"   • Declaração tributária: {'declaracaoTributaria' in dados_due}")
         if 'declaracaoTributaria' in dados_due:
             declaracao = dados_due.get('declaracaoTributaria', {})
-            print(f"   • Compensações: {len(declaracao.get('compensacoes', []))}")
-            print(f"   • Recolhimentos: {len(declaracao.get('recolhimentos', []))}")
+            logger.info(f"   • Compensações: {len(declaracao.get('compensacoes', []))}")
+            logger.info(f"   • Recolhimentos: {len(declaracao.get('recolhimentos', []))}")
         if atos_concessorios:
-            print(f"   • Atos concessórios suspensão: {len(atos_concessorios) if isinstance(atos_concessorios, list) else 0}")
+            logger.info(f"   • Atos concessórios suspensão: {len(atos_concessorios) if isinstance(atos_concessorios, list) else 0}")
         if atos_isencao:
-            print(f"   • Atos concessórios isenção: {len(atos_isencao) if isinstance(atos_isencao, list) else 0}")
+            logger.info(f"   • Atos concessórios isenção: {len(atos_isencao) if isinstance(atos_isencao, list) else 0}")
         if exigencias_fiscais:
-            print(f"   • Exigências fiscais: {len(exigencias_fiscais) if isinstance(exigencias_fiscais, list) else 0}")
+            logger.info(f"   • Exigências fiscais: {len(exigencias_fiscais) if isinstance(exigencias_fiscais, list) else 0}")
     
     # Estruturas para armazenar os dados normalizados
     dados_normalizados = {
@@ -157,10 +179,10 @@ def processar_dados_due(dados_due, atos_concessorios=None, atos_isencao=None, ex
         # Unidades locais
         'unidadeLocalDeDespacho_codigo': dados_due.get('unidadeLocalDeDespacho', {}).get('codigo', ''),
         'unidadeLocalDeEmbarque_codigo': dados_due.get('unidadeLocalDeEmbarque', {}).get('codigo', ''),
-        # Declaração tributária - divergente
+        # Declaracao tributaria - divergente
         'declaracaoTributaria_divergente': dados_due.get('declaracaoTributaria', {}).get('divergente', False),
-        # Data da última atualização via API
-        'data_ultima_atualizacao': datetime.utcnow().isoformat(),
+        # Data da ultima atualizacao via API
+        'data_ultima_atualizacao': datetime.now(timezone.utc).isoformat(),
     }
     dados_normalizados['due_principal'].append(due_principal)
     
@@ -455,9 +477,9 @@ def processar_dados_due(dados_due, atos_concessorios=None, atos_isencao=None, ex
     # 18. Compensações da declaração tributária
     declaracao_tributaria = dados_due.get('declaracaoTributaria', {})
     if debug_mode:
-        print(f"   🔍 Processando declaração tributária:")
-        print(f"      • Compensações: {len(declaracao_tributaria.get('compensacoes', []))}")
-        print(f"      • Recolhimentos: {len(declaracao_tributaria.get('recolhimentos', []))}")
+        logger.info(f"   🔍 Processando declaração tributária:")
+        logger.info(f"      • Compensações: {len(declaracao_tributaria.get('compensacoes', []))}")
+        logger.info(f"      • Recolhimentos: {len(declaracao_tributaria.get('recolhimentos', []))}")
     
     for compensacao in declaracao_tributaria.get('compensacoes', []):
         comp_row = {
@@ -468,7 +490,7 @@ def processar_dados_due(dados_due, atos_concessorios=None, atos_isencao=None, ex
         }
         dados_normalizados['due_declaracao_tributaria_compensacoes'].append(comp_row)
         if debug_mode:
-            print(f"      ✅ Compensação adicionada: {compensacao.get('numeroDaDeclaracao', 'N/A')}")
+            logger.info(f"      ✅ Compensação adicionada: {compensacao.get('numeroDaDeclaracao', 'N/A')}")
     
     # 19. Recolhimentos da declaração tributária
     for recolhimento in declaracao_tributaria.get('recolhimentos', []):
@@ -482,7 +504,7 @@ def processar_dados_due(dados_due, atos_concessorios=None, atos_isencao=None, ex
         }
         dados_normalizados['due_declaracao_tributaria_recolhimentos'].append(rec_row)
         if debug_mode:
-            print(f"      ✅ Recolhimento adicionado: {recolhimento.get('valorDoImpostoRecolhido', 0)}")
+            logger.info(f"      ✅ Recolhimento adicionado: {recolhimento.get('valorDoImpostoRecolhido', 0)}")
     
     # 20. Contestações da declaração tributária
     for idx_cont, contestacao in enumerate(declaracao_tributaria.get('contestacoes', [])):
@@ -497,12 +519,12 @@ def processar_dados_due(dados_due, atos_concessorios=None, atos_isencao=None, ex
         }
         dados_normalizados['due_declaracao_tributaria_contestacoes'].append(cont_row)
         if debug_mode:
-            print(f"      ✅ Contestação adicionada: {contestacao.get('motivo', 'N/A')}")
+            logger.info(f"      ✅ Contestação adicionada: {contestacao.get('motivo', 'N/A')}")
     
     # 21. Atos Concessórios de Suspensão (Drawback)
     if atos_concessorios and isinstance(atos_concessorios, list):
         if debug_mode:
-            print(f"   🔍 Processando atos concessórios de suspensão: {len(atos_concessorios)} registros")
+            logger.info(f"   🔍 Processando atos concessórios de suspensão: {len(atos_concessorios)} registros")
         
         for idx, ato in enumerate(atos_concessorios):
             ato_row = {
@@ -520,14 +542,14 @@ def processar_dados_due(dados_due, atos_concessorios=None, atos_isencao=None, ex
             }
             dados_normalizados['due_atos_concessorios_suspensao'].append(ato_row)
             if debug_mode:
-                print(f"      ✅ Ato concessório suspensão adicionado: {ato.get('numero', 'N/A')}")
+                logger.info(f"      ✅ Ato concessório suspensão adicionado: {ato.get('numero', 'N/A')}")
     elif debug_mode:
-        print(f"   ⚠️  Nenhum ato concessório de suspensão encontrado")
+        logger.info(f"   ⚠️  Nenhum ato concessório de suspensão encontrado")
     
     # 22. Atos Concessórios de Isenção (Drawback)
     if atos_isencao and isinstance(atos_isencao, list):
         if debug_mode:
-            print(f"   🔍 Processando atos concessórios de isenção: {len(atos_isencao)} registros")
+            logger.info(f"   🔍 Processando atos concessórios de isenção: {len(atos_isencao)} registros")
         
         for idx, ato in enumerate(atos_isencao):
             ato_row = {
@@ -545,14 +567,14 @@ def processar_dados_due(dados_due, atos_concessorios=None, atos_isencao=None, ex
             }
             dados_normalizados['due_atos_concessorios_isencao'].append(ato_row)
             if debug_mode:
-                print(f"      ✅ Ato concessório isenção adicionado: {ato.get('numero', 'N/A')}")
+                logger.info(f"      ✅ Ato concessório isenção adicionado: {ato.get('numero', 'N/A')}")
     elif debug_mode:
-        print(f"   ⚠️  Nenhum ato concessório de isenção encontrado")
+        logger.info(f"   ⚠️  Nenhum ato concessório de isenção encontrado")
     
     # 23. Exigências Fiscais
     if exigencias_fiscais and isinstance(exigencias_fiscais, list):
         if debug_mode:
-            print(f"   🔍 Processando exigências fiscais: {len(exigencias_fiscais)} registros")
+            logger.info(f"   🔍 Processando exigências fiscais: {len(exigencias_fiscais)} registros")
         
         for idx, exigencia in enumerate(exigencias_fiscais):
             exigencia_row = {
@@ -570,13 +592,13 @@ def processar_dados_due(dados_due, atos_concessorios=None, atos_isencao=None, ex
             }
             dados_normalizados['due_exigencias_fiscais'].append(exigencia_row)
             if debug_mode:
-                print(f"      ✅ Exigência fiscal adicionada: {exigencia.get('numero', 'N/A')}")
+                logger.info(f"      ✅ Exigência fiscal adicionada: {exigencia.get('numero', 'N/A')}")
     elif debug_mode:
-        print(f"   ⚠️  Nenhuma exigência fiscal encontrada")
+        logger.info(f"   ⚠️  Nenhuma exigência fiscal encontrada")
     
     return dados_normalizados
 
-def consultar_due_completa(numero_due, debug_mode=False):
+def consultar_due_completa(numero_due: str, debug_mode: bool = False) -> dict[str, Any] | None:
     """Consulta os dados completos de uma DUE específica"""
     try:
         # Token já deve estar válido - não verificar aqui para evitar autenticações desnecessárias
@@ -592,13 +614,13 @@ def consultar_due_completa(numero_due, debug_mode=False):
         for i, url_detalhes in enumerate(urls_alternativas):
             try:
                 if debug_mode:
-                    print(f"🔍 Tentativa {i+1}: {url_detalhes}")
+                    logger.info(f"🔍 Tentativa {i + 1}: {url_detalhes}")
                 
-                response = token_manager.session.get(url_detalhes, headers=token_manager.obter_headers(), timeout=10)
+                response = token_manager.request("GET", url_detalhes, headers=token_manager.obter_headers(), timeout=DEFAULT_HTTP_TIMEOUT_SEC)
                 
                 if response.status_code == 401:
                     if debug_mode:
-                        print(f"🔑 Token expirado ao consultar DUE completa: {numero_due}")
+                        logger.info(f"🔑 Token expirado ao consultar DUE completa: {numero_due}")
                     return {"error": "token_expirado", "numero_due": numero_due}
                 
                 if response.status_code == 200:
@@ -607,40 +629,40 @@ def consultar_due_completa(numero_due, debug_mode=False):
                     # Debug: verificar estrutura dos dados retornados
                     if dados_completos:
                         if debug_mode:
-                            print(f"✅ Dados completos obtidos para DUE {numero_due} (URL {i+1})")
-                            print(f"   • Tipo: {type(dados_completos)}")
+                            logger.info(f"✅ Dados completos obtidos para DUE {numero_due} (URL {i + 1})")
+                            logger.info(f"   • Tipo: {type(dados_completos)}")
                             if isinstance(dados_completos, dict):
-                                print(f"   • Campos: {list(dados_completos.keys())}")
-                                print(f"   • Tem itens: {'itens' in dados_completos}")
-                                print(f"   • Tem eventos: {'eventosDoHistorico' in dados_completos}")
+                                logger.info(f"   • Campos: {list(dados_completos.keys())}")
+                                logger.info(f"   • Tem itens: {'itens' in dados_completos}")
+                                logger.info(f"   • Tem eventos: {'eventosDoHistorico' in dados_completos}")
                         return dados_completos
                     else:
                         if debug_mode:
-                            print(f"⚠️  Dados completos vazios para DUE {numero_due} (URL {i+1})")
+                            logger.info(f"⚠️  Dados completos vazios para DUE {numero_due} (URL {i + 1})")
                 else:
                     if debug_mode:
-                        print(f"❌ Status {response.status_code} para URL {i+1}")
+                        logger.info(f"❌ Status {response.status_code} para URL {i + 1}")
                         
             except requests.exceptions.HTTPError as e:
                 if debug_mode:
-                    print(f"❌ Erro HTTP {e.response.status_code} para URL {i+1}")
+                    logger.info(f"❌ Erro HTTP {e.response.status_code} para URL {i + 1}")
                 continue
             except Exception as e:
                 if debug_mode:
-                    print(f"❌ Erro para URL {i+1}: {str(e)[:50]}")
+                    logger.info(f"❌ Erro para URL {i + 1}: {str(e)[:50]}")
                 continue
         
         # Se todas as URLs falharam
         if debug_mode:
-            print(f"❌ Todas as URLs falharam para DUE {numero_due}")
+            logger.info(f"❌ Todas as URLs falharam para DUE {numero_due}")
         return None
         
     except Exception as e:
         if debug_mode:
-            print(f"❌ Erro inesperado ao consultar DUE {numero_due}: {str(e)}")
+            logger.info(f"❌ Erro inesperado ao consultar DUE {numero_due}: {str(e)}")
         return None
 
-def consultar_due_por_nf(chave_nf, debug_mode=False):
+def consultar_due_por_nf(chave_nf: str, debug_mode: bool = False) -> dict[str, Any] | None:
     """
     Consulta DU-E pela chave da NF e obtém dados completos
     
@@ -658,28 +680,28 @@ def consultar_due_por_nf(chave_nf, debug_mode=False):
         # Primeira consulta: obter link da DU-E
         url_primeira = f"{URL_DUE_BASE}?nota-fiscal={chave_nf}"
         
-        response1 = token_manager.session.get(url_primeira, headers=token_manager.obter_headers(), timeout=10)
+        response1 = token_manager.request("GET", url_primeira, headers=token_manager.obter_headers(), timeout=DEFAULT_HTTP_TIMEOUT_SEC)
         
         if response1.status_code == 401:
             if debug_mode:
-                print(f"🔑 Token expirado na primeira consulta")
+                logger.info(f"🔑 Token expirado na primeira consulta")
             return {"error": "token_expirado", "chave": chave_nf}
         
         if response1.status_code == 422:
             if debug_mode:
-                print(f"⚠️  Erro 422 - Possível rate limiting")
+                logger.info(f"⚠️  Erro 422 - Possível rate limiting")
             return None
         
         response1.raise_for_status()
         dados1 = response1.json()
         
         if debug_mode:
-            print(f"   Response type: {type(dados1)}")
-            print(f"   Response length: {len(dados1) if isinstance(dados1, list) else 'Not a list'}")
+            logger.info(f"   Response type: {type(dados1)}")
+            logger.info(f"   Response length: {len(dados1) if isinstance(dados1, list) else 'Not a list'}")
         
         if not dados1 or len(dados1) == 0:
             if debug_mode:
-                print(f"⚠️  Primeira consulta retornou dados vazios")
+                logger.info(f"⚠️  Primeira consulta retornou dados vazios")
             return None  # Sem DU-E encontrada
         
         # Extrair dados da primeira resposta
@@ -688,16 +710,16 @@ def consultar_due_por_nf(chave_nf, debug_mode=False):
         href_due = primeiro_item.get('href', '')
         
         if debug_mode:
-            print(f"   Número DUE: {numero_due}")
-            print(f"   HREF DUE: {href_due}")
+            logger.info(f"   Número DUE: {numero_due}")
+            logger.info(f"   HREF DUE: {href_due}")
         
         if not href_due:
             if debug_mode:
-                print(f"⚠️  HREF não encontrado no primeiro item")
+                logger.info(f"⚠️  HREF não encontrado no primeiro item")
             return None  # Link não encontrado
         
         # Segunda consulta: obter detalhes básicos da DU-E
-        response2 = token_manager.session.get(href_due, headers=token_manager.obter_headers(), timeout=10)
+        response2 = token_manager.request("GET", href_due, headers=token_manager.obter_headers(), timeout=DEFAULT_HTTP_TIMEOUT_SEC)
         
         if response2.status_code == 401:
             return {"error": "token_expirado", "chave": chave_nf}
@@ -707,12 +729,12 @@ def consultar_due_por_nf(chave_nf, debug_mode=False):
         
         # Verificar se já temos dados suficientes na segunda consulta
         if debug_mode:
-            print(f"📋 Dados da segunda consulta:")
-            print(f"   • Campos: {list(dados2.keys()) if isinstance(dados2, dict) else 'Não é dict'}")
-            print(f"   • Tem itens: {'itens' in dados2 if isinstance(dados2, dict) else 'N/A'}")
-            print(f"   • Tem eventos: {'eventosDoHistorico' in dados2 if isinstance(dados2, dict) else 'N/A'}")
+            logger.info(f"📋 Dados da segunda consulta:")
+            logger.info(f"   • Campos: {list(dados2.keys()) if isinstance(dados2, dict) else 'Não é dict'}")
+            logger.info(f"   • Tem itens: {'itens' in dados2 if isinstance(dados2, dict) else 'N/A'}")
+            logger.info(f"   • Tem eventos: {'eventosDoHistorico' in dados2 if isinstance(dados2, dict) else 'N/A'}")
             if isinstance(dados2, dict) and 'itens' in dados2:
-                print(f"   • Quantidade de itens: {len(dados2['itens'])}")
+                logger.info(f"   • Quantidade de itens: {len(dados2['itens'])}")
         
         # OTIMIZAÇÃO: Usar dados da segunda consulta como completos - evitar terceira consulta
         dados_completos = dados2
@@ -724,19 +746,19 @@ def consultar_due_por_nf(chave_nf, debug_mode=False):
         if isinstance(link_atos_suspensao, dict) and link_atos_suspensao.get('href'):
             url_atos = link_atos_suspensao['href']
             if debug_mode:
-                print(f"🔍 Link para atos concessórios encontrado: {url_atos}")
+                logger.info(f"🔍 Link para atos concessórios encontrado: {url_atos}")
             
             try:
-                atos_response = token_manager.session.get(url_atos, headers=token_manager.obter_headers(), timeout=10)
+                atos_response = token_manager.request("GET", url_atos, headers=token_manager.obter_headers(), timeout=DEFAULT_HTTP_TIMEOUT_SEC)
                 if atos_response.status_code == 200:
                     atos_concessorios = atos_response.json()
                     if debug_mode and atos_concessorios and isinstance(atos_concessorios, list):
-                        print(f"✅ {len(atos_concessorios)} atos concessórios obtidos")
+                        logger.info(f"✅ {len(atos_concessorios)} atos concessórios obtidos")
             except Exception as e:
                 if debug_mode:
-                    print(f"⚠️  Erro ao consultar atos concessórios: {e}")
+                    logger.info(f"⚠️  Erro ao consultar atos concessórios: {e}")
         elif debug_mode:
-            print(f"⚠️  Nenhum link para atos concessórios de suspensão encontrado")
+            logger.info(f"⚠️  Nenhum link para atos concessórios de suspensão encontrado")
         
         # OTIMIZAÇÃO: Reduzir terceiras consultas desnecessárias
         # A segunda consulta já contém todos os dados necessários na maioria dos casos
@@ -753,22 +775,22 @@ def consultar_due_por_nf(chave_nf, debug_mode=False):
         
         if consulta_adicional_necessaria:
             if debug_mode:
-                print(f"🔄 Terceira consulta necessária: {motivo}")
+                logger.info(f"🔄 Terceira consulta necessária: {motivo}")
             
             try:
                 dados_terceira_consulta = consultar_due_completa(numero_due, debug_mode)
                 
                 if dados_terceira_consulta and isinstance(dados_terceira_consulta, dict):
                     if debug_mode:
-                        print(f"✅ Dados da terceira consulta obtidos com sucesso")
+                        logger.info(f"✅ Dados da terceira consulta obtidos com sucesso")
                     dados_completos = dados_terceira_consulta
                 elif debug_mode:
-                    print(f"⚠️  Terceira consulta falhou - mantendo dados da segunda")
+                    logger.info(f"⚠️  Terceira consulta falhou - mantendo dados da segunda")
             except Exception as e:
                 if debug_mode:
-                    print(f"⚠️  Erro na terceira consulta: {e}")
+                    logger.info(f"⚠️  Erro na terceira consulta: {e}")
         elif debug_mode:
-            print(f"✅ Segunda consulta suficiente - POUPANDO uma requisição HTTP!")
+            logger.info(f"✅ Segunda consulta suficiente - POUPANDO uma requisição HTTP!")
         
         # Resultado básico para CSV principal (usando dados_completos ao invés de dados2)
         resultado_basico = {
@@ -785,20 +807,20 @@ def consultar_due_por_nf(chave_nf, debug_mode=False):
             if debug_mode:
                 qtd_itens = len(dados_completos.get('itens', []))
                 qtd_eventos = len(dados_completos.get('eventosDoHistorico', []))
-                print(f"📊 Processando dados completos - DUE: {numero_due} ({qtd_itens} itens, {qtd_eventos} eventos)")
+                logger.info(f"📊 Processando dados completos - DUE: {numero_due} ({qtd_itens} itens, {qtd_eventos} eventos)")
             
             dados_normalizados = processar_dados_due(dados_completos, atos_concessorios, debug_mode)
             if dados_normalizados:
                 resultado_basico['dados_completos'] = dados_normalizados
                 if debug_mode:
                     total_registros = sum(len(dados) for dados in dados_normalizados.values())
-                    print(f"✅ Dados normalizados: {total_registros} registros totais para DUE: {numero_due}")
+                    logger.info(f"✅ Dados normalizados: {total_registros} registros totais para DUE: {numero_due}")
             else:
                 if debug_mode:
-                    print(f"⚠️  Falha ao processar dados normalizados para DUE: {numero_due}")
+                    logger.info(f"⚠️  Falha ao processar dados normalizados para DUE: {numero_due}")
         else:
             if debug_mode:
-                print(f"⚠️  Dados completos inválidos ou ausentes para DUE: {numero_due}")
+                logger.info(f"⚠️  Dados completos inválidos ou ausentes para DUE: {numero_due}")
         
         return resultado_basico
         
@@ -812,7 +834,11 @@ def consultar_due_por_nf(chave_nf, debug_mode=False):
     except Exception:
         return None  # Erro genérico
 
-def consultar_due_por_numero(chave_nf, numero_due, debug_mode=False):
+def consultar_due_por_numero(
+    chave_nf: str,
+    numero_due: str,
+    debug_mode: bool = False,
+) -> dict[str, Any] | None:
     """
     Consulta DU-E diretamente pelo número quando já conhecemos a DUE
     
@@ -821,18 +847,18 @@ def consultar_due_por_numero(chave_nf, numero_due, debug_mode=False):
     """
     try:
         if debug_mode:
-            print(f"🚀 [OTIMIZAÇÃO] Consultando DUE {numero_due} diretamente (pulando primeira consulta)")
+            logger.info(f"🚀 [OTIMIZAÇÃO] Consultando DUE {numero_due} diretamente (pulando primeira consulta)")
         
         # Ir direto para a segunda consulta - dados completos da DUE
         url_due = f"{URL_DUE_BASE}/numero-da-due/{numero_due}"
-        response = token_manager.session.get(url_due, headers=token_manager.obter_headers(), timeout=10)
+        response = token_manager.request("GET", url_due, headers=token_manager.obter_headers(), timeout=DEFAULT_HTTP_TIMEOUT_SEC)
         
         if response.status_code == 401:
             return {"error": "token_expirado", "chave": chave_nf}
         
         if response.status_code == 422:
             if debug_mode:
-                print(f"⚠️  Rate limiting (422) na consulta direta da DUE {numero_due}")
+                logger.info(f"⚠️  Rate limiting (422) na consulta direta da DUE {numero_due}")
             return None
         
         response.raise_for_status()
@@ -840,17 +866,17 @@ def consultar_due_por_numero(chave_nf, numero_due, debug_mode=False):
         
         if not dados_due or not isinstance(dados_due, dict):
             if debug_mode:
-                print(f"⚠️  Dados da DUE {numero_due} inválidos ou vazios")
+                logger.info(f"⚠️  Dados da DUE {numero_due} inválidos ou vazios")
             return None
         
         # Verificar se temos dados suficientes
         if debug_mode:
-            print(f"📋 Dados da consulta direta:")
-            print(f"   • Campos: {list(dados_due.keys()) if isinstance(dados_due, dict) else 'Não é dict'}")
-            print(f"   • Tem itens: {'itens' in dados_due if isinstance(dados_due, dict) else 'N/A'}")
-            print(f"   • Tem eventos: {'eventosDoHistorico' in dados_due if isinstance(dados_due, dict) else 'N/A'}")
+            logger.info(f"📋 Dados da consulta direta:")
+            logger.info(f"   • Campos: {list(dados_due.keys()) if isinstance(dados_due, dict) else 'Não é dict'}")
+            logger.info(f"   • Tem itens: {'itens' in dados_due if isinstance(dados_due, dict) else 'N/A'}")
+            logger.info(f"   • Tem eventos: {'eventosDoHistorico' in dados_due if isinstance(dados_due, dict) else 'N/A'}")
             if isinstance(dados_due, dict) and 'itens' in dados_due:
-                print(f"   • Quantidade de itens: {len(dados_due['itens'])}")
+                logger.info(f"   • Quantidade de itens: {len(dados_due['itens'])}")
         
         # Consultar atos concessórios de suspensão se disponível
         atos_concessorios = None
@@ -858,25 +884,25 @@ def consultar_due_por_numero(chave_nf, numero_due, debug_mode=False):
             link_atos_suspensao = f"{URL_DUE_BASE}/{numero_due}/drawback/suspensao/atos-concessorios"
             try:
                 if debug_mode:
-                    print(f"🔍 Link para atos concessórios encontrado: {link_atos_suspensao}")
+                    logger.info(f"🔍 Link para atos concessórios encontrado: {link_atos_suspensao}")
                 
-                response_atos = token_manager.session.get(link_atos_suspensao, headers=token_manager.obter_headers(), timeout=10)
+                response_atos = token_manager.request("GET", link_atos_suspensao, headers=token_manager.obter_headers(), timeout=DEFAULT_HTTP_TIMEOUT_SEC)
                 if response_atos.status_code == 200:
                     atos_concessorios = response_atos.json()
                     if atos_concessorios and len(atos_concessorios) > 0:
                         if debug_mode:
-                            print(f"✅ {len(atos_concessorios)} atos concessórios obtidos")
+                            logger.info(f"✅ {len(atos_concessorios)} atos concessórios obtidos")
                     else:
                         if debug_mode:
-                            print(f"⚠️  Nenhum ato concessório de suspensão encontrado")
+                            logger.info(f"⚠️  Nenhum ato concessório de suspensão encontrado")
                         atos_concessorios = None
                 else:
                     if debug_mode:
-                        print(f"⚠️  Erro {response_atos.status_code} ao consultar atos concessórios")
+                        logger.info(f"⚠️  Erro {response_atos.status_code} ao consultar atos concessórios")
                     atos_concessorios = None
             except Exception as e:
                 if debug_mode:
-                    print(f"⚠️  Erro ao consultar atos concessórios: {str(e)[:50]}")
+                    logger.info(f"⚠️  Erro ao consultar atos concessórios: {str(e)[:50]}")
                 atos_concessorios = None
         
         # Usar dados da consulta direta como completos
@@ -884,7 +910,7 @@ def consultar_due_por_numero(chave_nf, numero_due, debug_mode=False):
         
         # OTIMIZAÇÃO: Consulta otimizada - apenas 1 requisição ao invés de 2 (ou 3)
         if debug_mode:
-            print(f"✅ Consulta direta suficiente - ECONOMIA de 1 requisição HTTP!")
+            logger.info(f"✅ Consulta direta suficiente - ECONOMIA de 1 requisição HTTP!")
         
         # Resultado básico para due-siscomex.csv
         resultado_basico = {
@@ -901,20 +927,20 @@ def consultar_due_por_numero(chave_nf, numero_due, debug_mode=False):
             if debug_mode:
                 qtd_itens = len(dados_completos.get('itens', []))
                 qtd_eventos = len(dados_completos.get('eventosDoHistorico', []))
-                print(f"📊 Processando dados completos - DUE: {numero_due} ({qtd_itens} itens, {qtd_eventos} eventos)")
+                logger.info(f"📊 Processando dados completos - DUE: {numero_due} ({qtd_itens} itens, {qtd_eventos} eventos)")
             
             dados_normalizados = processar_dados_due(dados_completos, atos_concessorios, debug_mode)
             if dados_normalizados:
                 resultado_basico['dados_completos'] = dados_normalizados
                 if debug_mode:
                     total_registros = sum(len(dados) for dados in dados_normalizados.values())
-                    print(f"✅ Dados normalizados: {total_registros} registros totais para DUE: {numero_due}")
+                    logger.info(f"✅ Dados normalizados: {total_registros} registros totais para DUE: {numero_due}")
             else:
                 if debug_mode:
-                    print(f"⚠️  Falha ao processar dados normalizados para DUE: {numero_due}")
+                    logger.info(f"⚠️  Falha ao processar dados normalizados para DUE: {numero_due}")
         else:
             if debug_mode:
-                print(f"⚠️  Dados completos inválidos ou ausentes para DUE: {numero_due}")
+                logger.info(f"⚠️  Dados completos inválidos ou ausentes para DUE: {numero_due}")
         
         return resultado_basico
         
@@ -928,12 +954,12 @@ def consultar_due_por_numero(chave_nf, numero_due, debug_mode=False):
     except Exception:
         return None  # Erro genérico
 
-def processar_chave_individual(args):
+def processar_chave_individual(args: tuple) -> dict[str, Any] | None:
     """Processa uma única chave NF - função para ThreadPoolExecutor COM CACHE TRIPLO"""
     chave_nf, debug_mode, cache_nf_due, cache_chaves_nf, cache_dues, cache_lock = args
     
     if debug_mode:
-        print(f"🔍 [THREAD] Iniciando processamento da chave {chave_nf[:20]}...")
+        logger.info(f"🔍 [THREAD] Iniciando processamento da chave {chave_nf[:20]}...")
     
     # CACHE PERSISTENTE: Verificar se já conhecemos a DUE desta chave NF
     numero_due = None
@@ -941,14 +967,14 @@ def processar_chave_individual(args):
         if chave_nf in cache_nf_due:
             numero_due = cache_nf_due[chave_nf]
             if debug_mode:
-                print(f"💾 [CACHE-PERSISTENTE] Chave {chave_nf[:20]} → DUE {numero_due} (arquivo existente)")
+                logger.info(f"💾 [CACHE-PERSISTENTE] Chave {chave_nf[:20]} → DUE {numero_due} (arquivo existente)")
     
     # Se não conhecemos a DUE, fazer primeira consulta para descobrir
     if not numero_due:
         try:
             # Fazer apenas a primeira consulta para obter o número da DUE
             url_primeira = f"{URL_DUE_BASE}?nota-fiscal={chave_nf}"
-            response1 = token_manager.session.get(url_primeira, headers=token_manager.obter_headers(), timeout=10)
+            response1 = token_manager.request("GET", url_primeira, headers=token_manager.obter_headers(), timeout=DEFAULT_HTTP_TIMEOUT_SEC)
             
             if response1.status_code == 401:
                 return {"error": "token_expirado", "chave": chave_nf}
@@ -957,45 +983,45 @@ def processar_chave_individual(args):
                 if response1.status_code == 422:
                     # Rate limiting - não é erro de token
                     if debug_mode:
-                        print(f"⚠️  [THREAD] Rate limiting (422) na consulta da chave {chave_nf[:20]}")
+                        logger.info(f"⚠️  [THREAD] Rate limiting (422) na consulta da chave {chave_nf[:20]}")
                     return None  # Retornar None para rate limiting, não erro de token
                 elif response1.status_code == 401:
                     # Token expirado
                     return {"error": "token_expirado", "chave": chave_nf}
                 else:
                     if debug_mode:
-                        print(f"⚠️  [THREAD] Erro {response1.status_code} na consulta da chave {chave_nf[:20]}")
+                        logger.info(f"⚠️  [THREAD] Erro {response1.status_code} na consulta da chave {chave_nf[:20]}")
                     return None
             
             dados1 = response1.json()
             if not dados1 or len(dados1) == 0:
                 if debug_mode:
-                    print(f"⚠️  [THREAD] Sem DUE encontrada para chave {chave_nf[:20]}")
+                    logger.info(f"⚠️  [THREAD] Sem DUE encontrada para chave {chave_nf[:20]}")
                 return None
             
             # Extrair número da DUE da primeira consulta
             numero_due = dados1[0].get('rel', '')
             if not numero_due:
                 if debug_mode:
-                    print(f"⚠️  [THREAD] Número da DUE não encontrado na resposta para {chave_nf[:20]}")
+                    logger.info(f"⚠️  [THREAD] Número da DUE não encontrado na resposta para {chave_nf[:20]}")
                 return None
             
             # Salvar no cache persistente para futuras execuções
             with cache_lock:
                 cache_nf_due[chave_nf] = numero_due
                 if debug_mode:
-                    print(f"💾 [CACHE-PERSISTENTE] Nova relação salva: {chave_nf[:20]} → {numero_due}")
+                    logger.info(f"💾 [CACHE-PERSISTENTE] Nova relação salva: {chave_nf[:20]} → {numero_due}")
                     
         except Exception as e:
             if debug_mode:
-                print(f"❌ [THREAD] Erro na primeira consulta para {chave_nf[:20]}: {str(e)[:50]}")
+                logger.info(f"❌ [THREAD] Erro na primeira consulta para {chave_nf[:20]}: {str(e)[:50]}")
             return None
     # Agora temos o numero_due (do cache ou da consulta)
     # CACHE 1: Verificar se a chave NF já foi processada
     with cache_lock:
         if chave_nf in cache_chaves_nf:
             if debug_mode:
-                print(f"✅ [CACHE-NF] Chave {chave_nf[:20]} já processada - reutilizando dados")
+                logger.info(f"✅ [CACHE-NF] Chave {chave_nf[:20]} já processada - reutilizando dados")
             
             return cache_chaves_nf[chave_nf].copy()
     
@@ -1003,7 +1029,7 @@ def processar_chave_individual(args):
     with cache_lock:
         if numero_due in cache_dues:
             if debug_mode:
-                print(f"✅ [CACHE-DUE] DUE {numero_due} já consultada - reutilizando dados")
+                logger.info(f"✅ [CACHE-DUE] DUE {numero_due} já consultada - reutilizando dados")
             
             # Reutilizar dados da DUE, mas ajustar a chave NF
             resultado_due = cache_dues[numero_due].copy()
@@ -1034,21 +1060,21 @@ def processar_chave_individual(args):
                 # Cache por número DUE
                 cache_dues[numero_due] = resultado.copy()
                 if debug_mode:
-                    print(f"📦 [CACHE] Chave {chave_nf[:20]} e DUE {numero_due} adicionadas ao cache")
+                    logger.info(f"📦 [CACHE] Chave {chave_nf[:20]} e DUE {numero_due} adicionadas ao cache")
         
         return resultado
         
     except Exception as e:
         if debug_mode:
-            print(f"❌ [THREAD] Erro no processamento da chave {chave_nf[:20]}: {str(e)[:50]}")
+            logger.info(f"❌ [THREAD] Erro no processamento da chave {chave_nf[:20]}: {str(e)[:50]}")
         return None
 
-def carregar_cache_due_siscomex(arquivo='dados/due-siscomex.csv'):
+def carregar_cache_due_siscomex(arquivo: str = 'dados/due-siscomex.csv') -> dict[str, str]:
     """Carrega cache de chaves NF -> DUE do arquivo due-siscomex.csv existente"""
     cache_nf_due = {}
     
     if not os.path.exists(arquivo):
-        print("📄 Arquivo due-siscomex.csv não encontrado - processamento completo será necessário")
+        logger.info("📄 Arquivo due-siscomex.csv não encontrado - processamento completo será necessário")
         return cache_nf_due
     
     try:
@@ -1061,16 +1087,20 @@ def carregar_cache_due_siscomex(arquivo='dados/due-siscomex.csv'):
                 if chave_nf and numero_due:
                     cache_nf_due[chave_nf] = numero_due
             
-            print(f"📋 Cache carregado: {len(cache_nf_due)} relações Chave NF → DUE do arquivo existente")
+            logger.info(f"📋 Cache carregado: {len(cache_nf_due)} relações Chave NF → DUE do arquivo existente")
         else:
-            print("⚠️  Arquivo due-siscomex.csv existe mas não tem as colunas esperadas")
+            logger.info("⚠️  Arquivo due-siscomex.csv existe mas não tem as colunas esperadas")
             
     except Exception as e:
-        print(f"⚠️  Erro ao carregar cache do due-siscomex.csv: {e}")
+        logger.info(f"⚠️  Erro ao carregar cache do due-siscomex.csv: {e}")
     
     return cache_nf_due
 
-def processar_chaves_nf(chaves_nf, client_id, client_secret):
+def processar_chaves_nf(
+    chaves_nf: list[str],
+    client_id: str,
+    client_secret: str,
+) -> list[dict[str, Any]]:
     """
     Processa todas as chaves de NF com paralelização otimizada - OTIMIZADO PARA 1 TOKEN APENAS
     
@@ -1087,7 +1117,7 @@ def processar_chaves_nf(chaves_nf, client_id, client_secret):
     • Rate limiting inteligente e timeouts otimizados
     """
     
-    print("🔧 Iniciando processamento das chaves...")
+    logger.info("🔧 Iniciando processamento das chaves...")
     
     # Cache triplo para máxima eficiência
     cache_nf_due = carregar_cache_due_siscomex()  # Cache persistente: chave NF → número DUE
@@ -1096,24 +1126,24 @@ def processar_chaves_nf(chaves_nf, client_id, client_secret):
     lock_cache = threading.Lock()
     
     # Configurar credenciais no token manager compartilhado
-    print("🔧 Configurando credenciais...")
+    logger.info("🔧 Configurando credenciais...")
     token_manager.configurar_credenciais(client_id, client_secret)
     
     # AUTENTICAÇÃO ÚNICA E INICIAL COM CACHE PERSISTENTE
-    print("🔧 Verificando autenticação (cache + nova se necessário)...")
+    logger.info("🔧 Verificando autenticação (cache + nova se necessário)...")
     try:
         # Tentar usar cache primeiro, depois autenticar se necessário
         auth_success = token_manager.autenticar()
         
         if not auth_success:
-            print("❌ Falha na autenticação inicial")
+            logger.info("❌ Falha na autenticação inicial")
             return [], {}
         
-        print(f"✅ Autenticação pronta! {token_manager.status_token()}")
-        print(f"🚀 Otimização ativa: 2 consultas por DUE (ao invés de 3)")
+        logger.info(f"✅ Autenticação pronta! {token_manager.status_token()}")
+        logger.info(f"🚀 Otimização ativa: 2 consultas por DUE (ao invés de 3)")
         
     except Exception as e:
-        print(f"❌ Erro na autenticação: {e}")
+        logger.info(f"❌ Erro na autenticação: {e}")
         return [], {}
     
     resultados = []
@@ -1149,28 +1179,28 @@ def processar_chaves_nf(chaves_nf, client_id, client_secret):
     sucessos = 0
     tokens_expirados = []
     
-    print(f"\n🚀 Processando {total_chaves} chaves de NF em paralelo...")
-    print("=" * 60)
+    logger.info(f"\n🚀 Processando {total_chaves} chaves de NF em paralelo...")
+    logger.info("=" * 60)
     
     # Configurar número de workers (otimizado para performance máxima)
     max_workers = min(10, max(3, total_chaves // 30))  # Performance máxima
-    print(f"🔧 Configurando {max_workers} workers para processamento paralelo...")
+    logger.info(f"🔧 Configurando {max_workers} workers para processamento paralelo...")
     
     # Preparar argumentos (debug apenas para as primeiras 3) + caches compartilhados
     args_list = [(chave, i < 3, cache_nf_due, cache_chaves_nf, cache_dues, lock_cache) for i, chave in enumerate(chaves_nf)]
     
     # Processar em lotes paralelos
-    print("🔧 Iniciando ThreadPoolExecutor...")
+    logger.info("🔧 Iniciando ThreadPoolExecutor...")
     try:
         with ThreadPoolExecutor(max_workers=max_workers) as executor:
-            print("✅ ThreadPoolExecutor iniciado!")
+            logger.info("✅ ThreadPoolExecutor iniciado!")
             
             # Submeter tarefas
             future_to_chave = {
                 executor.submit(processar_chave_individual, args): args[0] 
                 for args in args_list
             }
-            print(f"✅ {len(future_to_chave)} tarefas submetidas!")
+            logger.info(f"✅ {len(future_to_chave)} tarefas submetidas!")
             
             # Processar resultados
             for future in as_completed(future_to_chave, timeout=600):  # 10 minutos timeout total
@@ -1183,7 +1213,7 @@ def processar_chaves_nf(chaves_nf, client_id, client_secret):
                     # Verificar se token expirou (raro com token único bem gerenciado)
                     if isinstance(resultado, dict) and resultado.get("error") == "token_expirado":
                         tokens_expirados.append(chave)
-                        print(f"[{processados:3d}/{total_chaves}] 🔄 {chave[:20]}... → Token expirado (inesperado!)")
+                        logger.info(f"[{processados:3d}/{total_chaves}] 🔄 {chave[:20]}... → Token expirado (inesperado!)")
                     elif resultado and isinstance(resultado, dict) and 'DU-E' in resultado:
                         # Adicionar resultado básico
                         resultado_basico = {k: v for k, v in resultado.items() if k != 'dados_completos'}
@@ -1202,36 +1232,36 @@ def processar_chaves_nf(chaves_nf, client_id, client_secret):
                             dues_normalizadas.add(numero_due)
                         
                         sucessos += 1
-                        print(f"[{processados:3d}/{total_chaves}] ✅ {chave[:20]}... → DU-E: {resultado['DU-E']} | Canal: {resultado['canal']}")
+                        logger.info(f"[{processados:3d}/{total_chaves}] ✅ {chave[:20]}... → DU-E: {resultado['DU-E']} | Canal: {resultado['canal']}")
                     else:
-                        print(f"[{processados:3d}/{total_chaves}] ⚠️  {chave[:20]}... → Sem DU-E")
+                        logger.info(f"[{processados:3d}/{total_chaves}] ⚠️  {chave[:20]}... → Sem DU-E")
                         
                 except Exception as e:
-                    print(f"[{processados:3d}/{total_chaves}] ❌ {chave[:20]}... → Erro: {str(e)[:30]}")
+                    logger.info(f"[{processados:3d}/{total_chaves}] ❌ {chave[:20]}... → Erro: {str(e)[:30]}")
                 
                 # Progress a cada 50 (menos frequente)
                 if processados % 50 == 0:
                     percentual = (processados / total_chaves) * 100
-                    print(f"    💫 {percentual:.1f}% ({sucessos}/{processados}) - {token_manager.status_token()}")
+                    logger.info(f"    💫 {percentual:.1f}% ({sucessos}/{processados}) - {token_manager.status_token()}")
                     
                     # Só mostrar se há problemas
                     if len(tokens_expirados) > 0:
-                        print(f"         ⚠️  Tokens expirados: {len(tokens_expirados)}")
+                        logger.info(f"         ⚠️  Tokens expirados: {len(tokens_expirados)}")
                     
     except Exception as e:
-        print(f"❌ Erro no ThreadPoolExecutor: {e}")
-        print("🔄 Mudando para processamento sequencial com o mesmo token...")
+        logger.info(f"❌ Erro no ThreadPoolExecutor: {e}")
+        logger.info("🔄 Mudando para processamento sequencial com o mesmo token...")
         # Fallback sequencial simplificado com mesmo token
         return processar_sequencial_simples(chaves_nf, dados_normalizados_consolidados)
     
     # Reprocessar tokens expirados se houver (COM AUTENTICAÇÃO ÚNCIA)
     if tokens_expirados:
-        print(f"\n🔄 Reprocessando {len(tokens_expirados)} chaves com token expirado...")
-        print("🔑 Realizando nova autenticação para tokens expirados...")
+        logger.info(f"\n🔄 Reprocessando {len(tokens_expirados)} chaves com token expirado...")
+        logger.info("🔑 Realizando nova autenticação para tokens expirados...")
         
         # APENAS UMA autenticação para todos os tokens expirados
         if token_manager.autenticar():
-            print(f"✅ Token renovado! Processando {len(tokens_expirados)} chaves...")
+            logger.info(f"✅ Token renovado! Processando {len(tokens_expirados)} chaves...")
             
             for chave in tokens_expirados:
                 resultado = consultar_due_por_nf(chave, False)
@@ -1245,47 +1275,50 @@ def processar_chaves_nf(chaves_nf, client_id, client_secret):
                             dados_normalizados_consolidados[tabela].extend(dados)
                     
                     sucessos += 1
-                    print(f"    ✅ {chave[:20]}... → DU-E: {resultado['DU-E']}")
+                    logger.info(f"    ✅ {chave[:20]}... → DU-E: {resultado['DU-E']}")
                 time.sleep(0.2)  # Delay reduzido
         else:
-            print("❌ Falha na renovação do token - chaves não reprocessadas")
+            logger.info("❌ Falha na renovação do token - chaves não reprocessadas")
     
-    print("=" * 60)
-    print(f"✅ Processamento concluído: {len(resultados)}/{total_chaves} sucessos")
+    logger.info("=" * 60)
+    logger.info(f"✅ Processamento concluído: {len(resultados)}/{total_chaves} sucessos")
     
     # Estatísticas dos caches
     chaves_cache_persistente = len([chave for chave in chaves_nf if chave in cache_nf_due])
-    print(f"💾 Cache persistente: {chaves_cache_persistente} relações Chave NF → DUE reutilizadas")
-    print(f"📦 Cache de chaves NF: {len(cache_chaves_nf)} chaves únicas processadas")
-    print(f"📦 Cache de DUEs: {len(cache_dues)} DUEs únicas consultadas")
-    print(f"📊 DUEs normalizadas: {len(dues_normalizadas)} DUEs únicas nos arquivos normalizados")
+    logger.info(f"💾 Cache persistente: {chaves_cache_persistente} relações Chave NF → DUE reutilizadas")
+    logger.info(f"📦 Cache de chaves NF: {len(cache_chaves_nf)} chaves únicas processadas")
+    logger.info(f"📦 Cache de DUEs: {len(cache_dues)} DUEs únicas consultadas")
+    logger.info(f"📊 DUEs normalizadas: {len(dues_normalizadas)} DUEs únicas nos arquivos normalizados")
     
     # Economia de consultas (cache de DUEs + cache persistente)
     total_consultas_evitadas = total_chaves - len(cache_dues)
     if total_consultas_evitadas > 0:
         percentual_economia = (total_consultas_evitadas / total_chaves) * 100
-        print(f"🚀 Economia de consultas: {total_consultas_evitadas} evitadas ({percentual_economia:.1f}%)")
+        logger.info(f"🚀 Economia de consultas: {total_consultas_evitadas} evitadas ({percentual_economia:.1f}%)")
     
     # Economia de primeira consulta (cache persistente)
     if chaves_cache_persistente > 0:
-        print(f"⚡ Economia de primeira consulta: {chaves_cache_persistente} chaves pularam primeira API")
+        logger.info(f"⚡ Economia de primeira consulta: {chaves_cache_persistente} chaves pularam primeira API")
     
     # Economia de normalização (duplicatas)
     total_normalizacoes_evitadas = len(cache_dues) - len(dues_normalizadas)
     if total_normalizacoes_evitadas > 0:
-        print(f"🎯 Economia de normalização: {total_normalizacoes_evitadas} DUEs não duplicadas nos arquivos")
+        logger.info(f"🎯 Economia de normalização: {total_normalizacoes_evitadas} DUEs não duplicadas nos arquivos")
     
     return resultados, dados_normalizados_consolidados
 
-def processar_sequencial_simples(chaves_nf, dados_normalizados_consolidados):
+def processar_sequencial_simples(
+    chaves_nf: list[str],
+    dados_normalizados_consolidados: dict[str, list[dict[str, Any]]],
+) -> list[dict[str, Any]]:
     """Fallback para processamento sequencial quando o paralelo falha"""
-    print("🔄 Executando processamento sequencial como fallback...")
+    logger.info("🔄 Executando processamento sequencial como fallback...")
     
     resultados = []
     sucessos = 0
     
     for i, chave in enumerate(chaves_nf, 1):
-        print(f"[{i:3d}/{len(chaves_nf)}] 🔄 Processando {chave[:20]}...")
+        logger.info(f"[{i:3d}/{len(chaves_nf)}] 🔄 Processando {chave[:20]}...")
         
         try:
             resultado = consultar_due_por_nf(chave, False)
@@ -1300,18 +1333,22 @@ def processar_sequencial_simples(chaves_nf, dados_normalizados_consolidados):
                         dados_normalizados_consolidados[tabela].extend(dados)
                 
                 sucessos += 1
-                print(f"[{i:3d}/{len(chaves_nf)}] ✅ {chave[:20]}... → DU-E: {resultado['DU-E']}")
+                logger.info(f"[{i:3d}/{len(chaves_nf)}] ✅ {chave[:20]}... → DU-E: {resultado['DU-E']}")
             else:
-                print(f"[{i:3d}/{len(chaves_nf)}] ⚠️  {chave[:20]}... → Sem DU-E")
+                logger.info(f"[{i:3d}/{len(chaves_nf)}] ⚠️  {chave[:20]}... → Sem DU-E")
                 
         except Exception as e:
-            print(f"[{i:3d}/{len(chaves_nf)}] ❌ {chave[:20]}... → Erro: {str(e)[:30]}")
+            logger.info(f"[{i:3d}/{len(chaves_nf)}] ❌ {chave[:20]}... → Erro: {str(e)[:30]}")
         
         time.sleep(0.5)  # Delay no sequencial
     
     return resultados, dados_normalizados_consolidados
 
-def salvar_resultados_normalizados(dados_normalizados, pasta='dados/due-normalizados', modo_incremental=True):
+def salvar_resultados_normalizados(
+    dados_normalizados: dict[str, list[dict[str, Any]]],
+    pasta: str = 'dados/due-normalizados',
+    modo_incremental: bool = True,
+) -> None:
     """
     Salva todos os dados normalizados no PostgreSQL.
     
@@ -1326,13 +1363,13 @@ def salvar_resultados_normalizados(dados_normalizados, pasta='dados/due-normaliz
         _salvar_resultados_normalizados_csv(dados_normalizados, pasta, modo_incremental)
         return
     
-    print(f"\n💾 Salvando dados normalizados no PostgreSQL...")
-    print("-" * 50)
+    logger.info(f"\n💾 Salvando dados normalizados no PostgreSQL...")
+    logger.info("-" * 50)
     
     # Conectar ao banco se nao estiver conectado
     if not db_manager.conn:
         if not db_manager.conectar():
-            print("[ERRO] Falha ao conectar ao PostgreSQL, tentando CSV como fallback...")
+            logger.error("[ERRO] Falha ao conectar ao PostgreSQL, tentando CSV como fallback...")
             _salvar_resultados_normalizados_csv(dados_normalizados, pasta, modo_incremental)
             return
     
@@ -1342,21 +1379,25 @@ def salvar_resultados_normalizados(dados_normalizados, pasta='dados/due-normaliz
     
     for tabela, dados in dados_normalizados.items():
         if dados:
-            print(f"   ✅ {tabela} → {len(dados)} registros")
+            logger.info(f"   ✅ {tabela} → {len(dados)} registros")
             total_registros += len(dados)
             tabelas_salvas += 1
         else:
-            print(f"   ⚠️  {tabela} → Sem dados")
+            logger.info(f"   ⚠️  {tabela} → Sem dados")
     
     # Inserir no banco
     if db_manager.inserir_due_completa(dados_normalizados):
-        print("-" * 50)
-        print(f"📊 {tabelas_salvas} tabelas salvas, {total_registros} registros no PostgreSQL")
+        logger.info("-" * 50)
+        logger.info(f"📊 {tabelas_salvas} tabelas salvas, {total_registros} registros no PostgreSQL")
     else:
-        print("[ERRO] Falha ao salvar no PostgreSQL")
+        logger.error("[ERRO] Falha ao salvar no PostgreSQL")
 
 
-def _salvar_resultados_normalizados_csv(dados_normalizados, pasta='dados/due-normalizados', modo_incremental=True):
+def _salvar_resultados_normalizados_csv(
+    dados_normalizados: dict[str, list[dict[str, Any]]],
+    pasta: str = 'dados/due-normalizados',
+    modo_incremental: bool = True,
+) -> None:
     """
     Salva todos os dados normalizados em CSVs separados (fallback).
     """
@@ -1365,8 +1406,8 @@ def _salvar_resultados_normalizados_csv(dados_normalizados, pasta='dados/due-nor
     if not os.path.exists(pasta):
         os.makedirs(pasta)
     
-    print(f"\n💾 Salvando dados normalizados em: {pasta}")
-    print("-" * 50)
+    logger.info(f"\n💾 Salvando dados normalizados em: {pasta}")
+    logger.info("-" * 50)
     
     # Chaves primarias por tabela para evitar duplicatas
     chaves_primarias = {
@@ -1397,7 +1438,7 @@ def _salvar_resultados_normalizados_csv(dados_normalizados, pasta='dados/due-nor
         arquivo = os.path.join(pasta, f"{tabela}.csv")
         
         if not dados:
-            print(f"   ⚠️  {tabela}.csv → Sem dados novos")
+            logger.info(f"   ⚠️  {tabela}.csv → Sem dados novos")
             continue
         
         df_novo = pd.DataFrame(dados)
@@ -1420,23 +1461,23 @@ def _salvar_resultados_normalizados_csv(dados_normalizados, pasta='dados/due-nor
                 else:
                     df_final = pd.concat([df_existente, df_novo], ignore_index=True)
                 
-                print(f"   ✅ {tabela}.csv → {len(df_novo)} novos + {len(df_existente)} existentes = {len(df_final)} total")
+                logger.info(f"   ✅ {tabela}.csv → {len(df_novo)} novos + {len(df_existente)} existentes = {len(df_final)} total")
             except Exception as e:
-                print(f"   ⚠️  {tabela}.csv → Erro ao fazer merge: {e}, sobrescrevendo")
+                logger.info(f"   ⚠️  {tabela}.csv → Erro ao fazer merge: {e}, sobrescrevendo")
                 df_final = df_novo
         else:
-            print(f"   ✅ {tabela}.csv → {len(df_final)} registros")
+            logger.info(f"   ✅ {tabela}.csv → {len(df_final)} registros")
         
         df_final.to_csv(arquivo, sep=';', index=False, encoding='utf-8-sig')
     
-    print("-" * 50)
-    print(f"📊 Total de tabelas salvas: {len([t for t, d in dados_normalizados.items() if d])}")
+    logger.info("-" * 50)
+    logger.info(f"📊 Total de tabelas salvas: {len([t for t, d in dados_normalizados.items() if d])}")
 
 
-def salvar_resultados(resultados, arquivo='dados/due-siscomex.csv'):
+def salvar_resultados(resultados: list[dict[str, Any]], arquivo: str = 'dados/due-siscomex.csv') -> None:
     """Salva os resultados básicos em CSV (compatibilidade)"""
     if not resultados:
-        print("⚠️  Nenhum resultado para salvar")
+        logger.info("⚠️  Nenhum resultado para salvar")
         return
     
     try:
@@ -1449,25 +1490,29 @@ def salvar_resultados(resultados, arquivo='dados/due-siscomex.csv'):
         df = pd.DataFrame(resultados)
         df.to_csv(arquivo, sep=';', index=False, encoding='utf-8-sig')
         
-        print(f"\n💾 Dados básicos salvos em: {arquivo}")
-        print(f"   Total de registros: {len(df)}")
-        print(f"   Colunas: {', '.join(df.columns.tolist())}")
+        logger.info(f"\n💾 Dados básicos salvos em: {arquivo}")
+        logger.info(f"   Total de registros: {len(df)}")
+        logger.info(f"   Colunas: {', '.join(df.columns.tolist())}")
         
     except Exception as e:
-        print(f"❌ Erro ao salvar CSV: {e}")
+        logger.info(f"❌ Erro ao salvar CSV: {e}")
 
-def testar_normalizacao_due(client_id, client_secret, primeira_chave=None):
+def testar_normalizacao_due(
+    client_id: str,
+    client_secret: str,
+    primeira_chave: str | None = None,
+) -> None:
     """Testa a normalização com apenas uma DU-E para debug"""
     
     # Configurar credenciais no token manager compartilhado
     token_manager.configurar_credenciais(client_id, client_secret)
     
-    print("🔑 Realizando autenticação única para teste...")
+    logger.info("🔑 Realizando autenticação única para teste...")
     if not token_manager.autenticar():
-        print("❌ Falha na autenticação para teste")
+        logger.info("❌ Falha na autenticação para teste")
         return
     
-    print(f"✅ Token obtido! Válido até: {token_manager.expiracao.strftime('%H:%M:%S') if token_manager.expiracao else 'N/A'}")
+    logger.info(f"✅ Token obtido! Válido até: {token_manager.expiracao.strftime('%H:%M:%S') if token_manager.expiracao else 'N/A'}")
     
     # Usar a primeira chave ou ler do CSV
     if not primeira_chave:
@@ -1476,81 +1521,81 @@ def testar_normalizacao_due(client_id, client_secret, primeira_chave=None):
             return
         primeira_chave = chaves_nf[0]
     
-    print(f"\n🧪 TESTE DE NORMALIZAÇÃO - Chave: {primeira_chave}")
-    print("=" * 60)
+    logger.info(f"\n🧪 TESTE DE NORMALIZAÇÃO - Chave: {primeira_chave}")
+    logger.info("=" * 60)
     
     # Consultar com debug habilitado
     resultado = consultar_due_por_nf(primeira_chave, debug_mode=True)
     
     if resultado and 'dados_completos' in resultado:
-        print("\n✅ Teste de normalização bem-sucedido!")
+        logger.info("\n✅ Teste de normalização bem-sucedido!")
         dados_normalizados = resultado['dados_completos']
         for tabela, dados in dados_normalizados.items():
             if dados:
-                print(f"  • {tabela}: {len(dados)} registros")
+                logger.info(f"  • {tabela}: {len(dados)} registros")
     else:
-        print("\n❌ Teste de normalização falhou!")
-        print("   Verifique os logs acima para identificar o problema")
+        logger.info("\n❌ Teste de normalização falhou!")
+        logger.info("   Verifique os logs acima para identificar o problema")
 
-def main():
+def main() -> None:
     """Função principal otimizada"""
-    print("=" * 70)
-    print("CONSULTA DUE SISCOMEX - VERSÃO NORMALIZADA COM ALTA PERFORMANCE")
-    print("=" * 70)
-    print(f"Data/Hora: {datetime.now().strftime('%d/%m/%Y %H:%M:%S')}")
-    print("🚀 Funcionalidades:")
-    print("   • Processamento paralelo otimizado")
-    print("   • Consulta de dados completos da DUE (2-3 requisições por NF)")
-    print("   • Normalização em múltiplas tabelas CSV")
-    print("   • Consulta de atos concessórios de suspensão (drawback)")
-    print("   • Pool de conexões HTTP reutilizáveis")
-    print("   • Rate limiting inteligente")
-    print("   • Modo de teste para debug")
-    print("=" * 70)
+    logger.info("=" * 70)
+    logger.info("CONSULTA DUE SISCOMEX - VERSÃO NORMALIZADA COM ALTA PERFORMANCE")
+    logger.info("=" * 70)
+    logger.info(f"Data/Hora: {datetime.now().strftime('%d/%m/%Y %H:%M:%S')}")
+    logger.info("🚀 Funcionalidades:")
+    logger.info("   • Processamento paralelo otimizado")
+    logger.info("   • Consulta de dados completos da DUE (2-3 requisições por NF)")
+    logger.info("   • Normalização em múltiplas tabelas CSV")
+    logger.info("   • Consulta de atos concessórios de suspensão (drawback)")
+    logger.info("   • Pool de conexões HTTP reutilizáveis")
+    logger.info("   • Rate limiting inteligente")
+    logger.info("   • Modo de teste para debug")
+    logger.info("=" * 70)
     
     # Verificar credenciais de autenticação
-    print("🔧 Verificando credenciais...")
+    logger.info("🔧 Verificando credenciais...")
     client_id = os.environ.get("SISCOMEX_CLIENT_ID")
     client_secret = os.environ.get("SISCOMEX_CLIENT_SECRET")
     
     if not client_id or not client_secret:
-        print("❌ Credenciais do Siscomex não encontradas nas variáveis de ambiente")
-        print("Configure as variáveis SISCOMEX_CLIENT_ID e SISCOMEX_CLIENT_SECRET no arquivo .env")
+        logger.info("❌ Credenciais do Siscomex não encontradas nas variáveis de ambiente")
+        logger.info("Configure as variáveis SISCOMEX_CLIENT_ID e SISCOMEX_CLIENT_SECRET no arquivo .env")
         return
     
-    print("✅ Credenciais encontradas!")
+    logger.info("✅ Credenciais encontradas!")
     
     # Ler chaves do CSV
-    print("🔧 Lendo chaves do CSV...")
+    logger.info("🔧 Lendo chaves do CSV...")
     chaves_nf = ler_chaves_nf()
     if not chaves_nf:
-        print("❌ Nenhuma chave encontrada - abortando")
+        logger.info("❌ Nenhuma chave encontrada - abortando")
         return
     
-    print(f"✅ {len(chaves_nf)} chaves carregadas com sucesso!")
+    logger.info(f"✅ {len(chaves_nf)} chaves carregadas com sucesso!")
     
     # Opções de processamento
-    print(f"\n📋 {len(chaves_nf)} chaves de NF encontradas")
-    print("📁 Será criado:")
-    print("   • due-siscomex.csv (dados básicos)")
-    print("   • dados/due-normalizados/ (13 tabelas normalizadas)")
-    print("\nOpções:")
-    print("  1. Processar todas as chaves (PRODUÇÃO)")
-    print("  2. Testar normalização com 1 DU-E (DEBUG)")
-    print("  3. Cancelar")
+    logger.info(f"\n📋 {len(chaves_nf)} chaves de NF encontradas")
+    logger.info("📁 Será criado:")
+    logger.info("   • due-siscomex.csv (dados básicos)")
+    logger.info("   • dados/due-normalizados/ (13 tabelas normalizadas)")
+    logger.info("\nOpções:")
+    logger.info("  1. Processar todas as chaves (PRODUÇÃO)")
+    logger.info("  2. Testar normalização com 1 DU-E (DEBUG)")
+    logger.info("  3. Cancelar")
     
     escolha = input("Escolha uma opção (1-3): ").strip()
     
     if escolha == "2":
-        print("🧪 Iniciando teste de normalização...")
+        logger.info("🧪 Iniciando teste de normalização...")
         testar_normalizacao_due(client_id, client_secret)
         return
     elif escolha != "1":
-        print("❌ Processamento cancelado")
+        logger.info("❌ Processamento cancelado")
         return
     
     # Processar todas as chaves
-    print("🚀 Iniciando processamento de todas as chaves...")
+    logger.info("🚀 Iniciando processamento de todas as chaves...")
     resultados, dados_normalizados = processar_chaves_nf(chaves_nf, client_id, client_secret)
     
     # Salvar resultados
@@ -1562,66 +1607,66 @@ def main():
         salvar_resultados_normalizados(dados_normalizados)
         
         # Estatísticas finais
-        print(f"\n📊 ESTATÍSTICAS FINAIS:")
-        print("-" * 50)
+        logger.info(f"\n📊 ESTATÍSTICAS FINAIS:")
+        logger.info("-" * 50)
         
         # Status final do token
-        print(f"🔑 Status do token ao final: {token_manager.status_token()}")
-        print()
+        logger.info(f"🔑 Status do token ao final: {token_manager.status_token()}")
+        logger.info("")
         
         df_basico = pd.DataFrame(resultados)
         
         # Canais encontrados
         canais = df_basico['canal'].value_counts()
-        print("Canais encontrados:")
+        logger.info("Canais encontrados:")
         for canal, qtd in canais.items():
-            print(f"  - {canal}: {qtd} DU-Es")
+            logger.info(f"  - {canal}: {qtd} DU-Es")
         
         # Situações
         if 'situacao' in df_basico.columns:
             situacoes = df_basico['situacao'].value_counts()
-            print("\nSituações:")
+            logger.info("\nSituações:")
             for situacao, qtd in situacoes.head(3).items():
-                print(f"  - {situacao}: {qtd}")
+                logger.info(f"  - {situacao}: {qtd}")
         
         # Valor total
         valor_total = df_basico['valorTotalMercadoria'].sum()
-        print(f"\nValor total das mercadorias: R$ {valor_total:,.2f}")
-        print(f"Total de DU-Es processadas: {len(df_basico)}")
+        logger.info(f"\nValor total das mercadorias: R$ {valor_total:,.2f}")
+        logger.info(f"Total de DU-Es processadas: {len(df_basico)}")
         
         # Estatísticas dos dados normalizados
-        print(f"\nTabelas normalizadas criadas:")
+        logger.info(f"\nTabelas normalizadas criadas:")
         total_registros_normalizados = 0
         for tabela, dados in dados_normalizados.items():
             if dados:
-                print(f"  - {tabela}: {len(dados)} registros")
+                logger.info(f"  - {tabela}: {len(dados)} registros")
                 total_registros_normalizados += len(dados)
         
         if total_registros_normalizados == 0:
-            print("  ⚠️  NENHUMA tabela normalizada foi criada!")
-            print("  💡 Possíveis causas:")
-            print("     • API não retorna dados completos")
-            print("     • Estrutura JSON diferente do esperado")
-            print("     • Problemas na função de processamento")
+            logger.info("  ⚠️  NENHUMA tabela normalizada foi criada!")
+            logger.info("  💡 Possíveis causas:")
+            logger.info("     • API não retorna dados completos")
+            logger.info("     • Estrutura JSON diferente do esperado")
+            logger.info("     • Problemas na função de processamento")
         else:
-            print(f"  ✅ Total de registros normalizados: {total_registros_normalizados}")
+            logger.info(f"  ✅ Total de registros normalizados: {total_registros_normalizados}")
         
         # Estatísticas específicas dos atos concessórios
         atos_count = len(dados_normalizados.get('due_atos_concessorios_suspensao', []))
         if atos_count > 0:
-            print(f"\n🎯 Atos concessórios de suspensão:")
-            print(f"  - Total de registros: {atos_count}")
+            logger.info(f"\n🎯 Atos concessórios de suspensão:")
+            logger.info(f"  - Total de registros: {atos_count}")
             
             # Analisar por tipo se houver dados
             df_atos = pd.DataFrame(dados_normalizados['due_atos_concessorios_suspensao'])
             if not df_atos.empty and 'tipo_descricao' in df_atos.columns:
                 tipos = df_atos['tipo_descricao'].value_counts()
                 for tipo, qtd in tipos.items():
-                    print(f"  - {tipo}: {qtd} registros")
+                    logger.info(f"  - {tipo}: {qtd} registros")
         
-    print("\n" + "=" * 70)
-    print("PROCESSAMENTO FINALIZADO")
-    print("=" * 70)
+    logger.info("\n" + "=" * 70)
+    logger.info("PROCESSAMENTO FINALIZADO")
+    logger.info("=" * 70)
 
 if __name__ == "__main__":
     main()

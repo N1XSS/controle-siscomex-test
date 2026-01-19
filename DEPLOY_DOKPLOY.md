@@ -127,7 +127,7 @@ POSTGRES_DB=siscomex_export_db
 **⚠️ DICA**: Para descobrir qual opção usar:
 1. Se o PostgreSQL está em container Docker: use o nome do serviço ou IP do container
 2. Se está rodando diretamente na VPS: use `host.docker.internal` (padrão) ou `localhost` (se usar network_mode: host)
-3. Teste a conexão: `docker exec -it nome_container python3 -c "from db_manager import db_manager; db_manager.conectar()"`
+3. Teste a conexão: `docker exec -it nome_container python3 -c "from src.database.manager import db_manager; db_manager.conectar()"`
 
 ### Variáveis Obrigatórias - Credenciais Siscomex
 
@@ -185,11 +185,11 @@ Após o deploy:
 1. **Verificar logs**: Acesse os logs no Dokploy para verificar se há erros
 2. **Executar setup do banco** (se necessário):
    ```bash
-   docker exec -it controle-siscomex python3 -c "from db_manager import db_manager; db_manager.conectar(); db_manager.criar_tabelas(); db_manager.desconectar()"
+   docker exec -it controle-siscomex python3 -c "from src.database.manager import db_manager; db_manager.conectar(); db_manager.criar_tabelas(); db_manager.desconectar()"
    ```
 3. **Testar sincronização manual** (opcional):
    ```bash
-   docker exec -it controle-siscomex python3 main.py --status
+   docker exec -it controle-siscomex python3 -m src.main --status
    ```
 
 ## Agendamento
@@ -221,22 +221,22 @@ docker exec -it controle-siscomex tail -f /app/logs/cron.log
 
 ### Executar sincronização manual
 ```bash
-docker exec -it controle-siscomex python3 main.py --completo
+docker exec -it controle-siscomex python3 -m src.main --completo
 ```
 
 ### Executar apenas novas DUEs
 ```bash
-docker exec -it controle-siscomex python3 main.py --novas
+docker exec -it controle-siscomex python3 -m src.main --novas
 ```
 
 ### Executar apenas atualização
 ```bash
-docker exec -it controle-siscomex python3 main.py --atualizar
+docker exec -it controle-siscomex python3 -m src.main --atualizar
 ```
 
 ### Verificar status
 ```bash
-docker exec -it controle-siscomex python3 main.py --status
+docker exec -it controle-siscomex python3 -m src.main --status
 ```
 
 ### Acessar shell do container
@@ -248,7 +248,7 @@ docker exec -it controle-siscomex /bin/bash
 
 1. **Logs no Dokploy**: Acesse a aba de logs no Dokploy
 2. **Logs do cron**: `/app/logs/cron.log` dentro do container
-3. **Status do banco**: Use `python3 main.py --status` para ver estatísticas
+3. **Status do banco**: Use `python3 -m src.main --status` para ver estatísticas
 
 ## Troubleshooting
 
@@ -381,7 +381,7 @@ docker inspect nome_container_postgres | grep IPAddress
 ### Erro de conexão PostgreSQL
 - Verifique as credenciais no Dokploy (POSTGRES_HOST, POSTGRES_PORT, POSTGRES_USER, POSTGRES_PASSWORD, POSTGRES_DB)
 - Verifique se o PostgreSQL está acessível da VPS (firewall/rede)
-- Teste a conexão: `docker exec -it controle-siscomex python3 -c "from db_manager import db_manager; db_manager.conectar()"`
+- Teste a conexão: `docker exec -it controle-siscomex python3 -c "from src.database.manager import db_manager; db_manager.conectar()"`
 - Verifique logs: `docker exec -it controle-siscomex env | grep POSTGRES`
 
 ### Sincronização não executa

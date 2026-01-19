@@ -33,6 +33,9 @@ Tabelas Suporte:
 - suporte_pais, suporte_moeda, suporte_enquadramento, etc.
 """
 
+from src.core.logger import logger
+
+
 # =============================================================================
 # TABELAS DE SUPORTE (14 tabelas)
 # =============================================================================
@@ -745,6 +748,6 @@ DROP TABLE IF EXISTS suporte_pais CASCADE;
 """
 
 if __name__ == "__main__":
-    print(f"Schema definido com {len(ALL_TABLES)} tabelas")
+    logger.info(f"Schema definido com {len(ALL_TABLES)} tabelas")
     for nome, _ in ALL_TABLES:
-        print(f"  - {nome}")
+        logger.info(f"  - {nome}")

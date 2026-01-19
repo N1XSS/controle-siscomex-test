@@ -36,14 +36,14 @@ fi
 echo ""
 echo "[FASE 1] Sincronizando novas NFs..."
 echo "----------------------------------------------"
-python3 consulta_sap.py
-python3 sync_novas.py
+python3 -m src.api.athena.client
+python3 -m src.sync.new_dues
 
 # 2. Atualizar DUEs existentes (pendentes e com mudancas)
 echo ""
 echo "[FASE 2] Atualizando DUEs existentes..."
 echo "----------------------------------------------"
-python3 sync_atualizar.py
+python3 -m src.sync.update_dues
 
 # Resumo
 echo ""

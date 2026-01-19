@@ -57,7 +57,7 @@ fi
 if [ $MISSING_VARS -eq 0 ]; then
     echo "[INFO] Verificando conexao com PostgreSQL..."
     python3 << 'PYTHON_SCRIPT'
-from db_manager import db_manager
+from src.database.manager import db_manager
 import sys
 
 try:
@@ -84,7 +84,7 @@ fi
 
 # Executar primeira sincronizacao ao iniciar (opcional)
 # Descomente a linha abaixo se desejar executar ao iniciar o container
-# python3 main.py --completo
+# python3 -m src.main --completo
 
 echo "[INFO] Iniciando cron daemon..."
 echo "[INFO] Agendamento configurado para executar diariamente as 06:00 (horario de Brasilia)"

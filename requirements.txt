@@ -26,3 +26,7 @@ mypy>=0.950              # Para verificação de tipos
 numpy>=1.21.0            # Para operações numéricas
 psutil>=5.8.0            # Para monitoramento de sistema
 memory-profiler>=0.60.0  # Para análise de memória
+# Async/cache dependencies (opcional)
+aiohttp>=3.9.0         # Para chamadas async na API Siscomex (opcional)
+redis>=5.0.0           # Para cache Redis (opcional)
+types-requests>=2.31.0.20240602  # Stubs para mypy
