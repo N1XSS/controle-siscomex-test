@@ -86,6 +86,42 @@ fi
 # Descomente a linha abaixo se desejar executar ao iniciar o container
 # python3 -m src.main --completo
 
+echo "[INFO] Configurando crontab com variaveis de ambiente..."
+
+# Criar crontab com variaveis de ambiente
+cat > /tmp/crontab.txt << EOF
+POSTGRES_HOST=${POSTGRES_HOST}
+POSTGRES_PORT=${POSTGRES_PORT}
+POSTGRES_USER=${POSTGRES_USER}
+POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+POSTGRES_DB=${POSTGRES_DB}
+AWS_ACCESS_KEY=${AWS_ACCESS_KEY}
+AWS_SECRET_KEY=${AWS_SECRET_KEY}
+AWS_REGION=${AWS_REGION}
+ATHENA_CATALOG=${ATHENA_CATALOG}
+ATHENA_DATABASE=${ATHENA_DATABASE}
+ATHENA_WORKGROUP=${ATHENA_WORKGROUP}
+S3_OUTPUT_LOCATION=${S3_OUTPUT_LOCATION}
+SISCOMEX_CLIENT_ID=${SISCOMEX_CLIENT_ID}
+SISCOMEX_CLIENT_SECRET=${SISCOMEX_CLIENT_SECRET}
+SISCOMEX_RATE_LIMIT_HOUR=${SISCOMEX_RATE_LIMIT_HOUR}
+SISCOMEX_RATE_LIMIT_BURST=${SISCOMEX_RATE_LIMIT_BURST}
+API_KEY=${API_KEY}
+TZ=${TZ}
+
+# Agendamento para sincronizacao diaria do sistema DUE
+0 6 * * * cd /app && /usr/local/bin/python3 -m src.main --completo >> /app/logs/cron.log 2>&1
+
+# Opcional: Executar apenas sincronizacao de novas DUEs a cada 6 horas
+# 0 */6 * * * cd /app && /usr/local/bin/python3 -m src.main --novas >> /app/logs/cron.log 2>&1
+
+# Opcional: Executar apenas atualizacao de DUEs existentes as 02:00
+# 0 2 * * * cd /app && /usr/local/bin/python3 -m src.main --atualizar >> /app/logs/cron.log 2>&1
+EOF
+
+crontab /tmp/crontab.txt
+rm /tmp/crontab.txt
+echo "[INFO] Crontab configurado com sucesso!"
 echo "[INFO] Iniciando cron daemon..."
 echo "[INFO] Agendamento configurado para executar diariamente as 06:00 (horario de Brasilia)"
 
