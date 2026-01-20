@@ -302,56 +302,28 @@ def salvar_tabelas_suporte(
     dados_consolidados: dict[str, Any],
     pasta: str = 'dados/tabelas-suporte',
 ) -> None:
-    """Salva tabelas de suporte.
-
-    Args:
-        dados_consolidados: Dados consolidados.
-        pasta: Diretorio de saida.
     """
-    # Garantir que a pasta existe
-    if not os.path.exists(pasta):
-        os.makedirs(pasta)
-    
-    logger.info(f"\nSalvando tabelas de suporte em: {pasta}")
-    logger.info("-" * 60)
-    
-    total_tabelas = 0
-    total_registros = 0
-    
-    for nome_estrutura, dados in dados_consolidados.items():
-        if dados:  # So salvar se houver dados
-            arquivo = os.path.join(pasta, f"{nome_estrutura}.csv")
-            df = pd.DataFrame(dados)
-            df.to_csv(arquivo, sep=';', index=False, encoding='utf-8-sig')
-            logger.info(f"   {nome_estrutura}.csv -> {len(df)} registros")
-            total_tabelas += 1
-            total_registros += len(df)
-        else:
-            logger.info(f"   {nome_estrutura}.csv -> Sem dados")
-    
-    logger.info("-" * 60)
-    logger.info(f"Total: {total_tabelas} arquivos CSV com {total_registros:,} registros")
-    
-    # Criar arquivo de resumo
-    criar_resumo_tabelas_suporte(dados_consolidados, pasta)
+    DEPRECATED: Função removida. Use apenas PostgreSQL.
+
+    Esta função foi removida porque o sistema agora usa exclusivamente PostgreSQL.
+    Use db_manager para salvar tabelas de suporte no PostgreSQL.
+    """
+    raise NotImplementedError(
+        "Salvamento de tabelas de suporte em CSV foi removido. "
+        "O sistema agora usa exclusivamente PostgreSQL. "
+        "Use db_manager.salvar_tabelas_suporte() ao invés desta função."
+    )
 
 def criar_resumo_tabelas_suporte(dados_consolidados: dict[str, Any], pasta: str) -> None:
-    """Cria arquivo de resumo das tabelas.
-
-    Args:
-        dados_consolidados: Dados consolidados.
-        pasta: Diretorio de saida.
     """
-    resumo = []
-    for nome_estrutura, dados in dados_consolidados.items():
-        if nome_estrutura.endswith("_metadados"):
-            continue
-        resumo.append({"tabela": nome_estrutura, "registros": len(dados)})
+    DEPRECATED: Função removida. Use apenas PostgreSQL.
 
-    arquivo_resumo = os.path.join(pasta, "resumo_tabelas_suporte.csv")
-    df_resumo = pd.DataFrame(resumo)
-    df_resumo.to_csv(arquivo_resumo, sep=";", index=False, encoding="utf-8-sig")
-    logger.info("Resumo salvo em: resumo_tabelas_suporte.csv")
+    Esta função foi removida porque o sistema agora usa exclusivamente PostgreSQL.
+    """
+    raise NotImplementedError(
+        "Criação de resumo em CSV foi removida. "
+        "Use queries SQL no PostgreSQL para gerar relatórios."
+    )
 
 def baixar_tabelas_suporte(
     client_id: str,

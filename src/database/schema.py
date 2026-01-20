@@ -272,12 +272,12 @@ CREATE TABLE IF NOT EXISTS due_eventos_historico (
     data_e_hora_do_evento TIMESTAMP,
     evento VARCHAR(150),
     responsavel VARCHAR(100),
-    informacoes_adicionais TEXT,
-    detalhes VARCHAR(400),
-    motivo VARCHAR(150),
-    tipo_evento VARCHAR(50),
-    data TIMESTAMP
+    informacoes_adicionais TEXT
 );
+-- NOTA: Campos removidos (não existem na API Siscomex):
+-- - detalhes, motivo, tipo_evento, data
+-- API retorna apenas: dataEHoraDoEvento, evento, responsavel, informacoesAdicionais
+
 CREATE INDEX IF NOT EXISTS idx_due_eventos_numero_due ON due_eventos_historico(numero_due);
 CREATE INDEX IF NOT EXISTS idx_due_eventos_data ON due_eventos_historico(data_e_hora_do_evento);
 """
@@ -305,7 +305,6 @@ CREATE TABLE IF NOT EXISTS due_itens (
     ncm_unidade_medida_estatistica VARCHAR(20),
     exportador_numero_do_documento VARCHAR(20),
     exportador_tipo_do_documento VARCHAR(20),
-    exportador_nome VARCHAR(150),
     exportador_estrangeiro BOOLEAN,
     exportador_nacionalidade_codigo INTEGER,
     exportador_nacionalidade_nome VARCHAR(50),
@@ -313,6 +312,11 @@ CREATE TABLE IF NOT EXISTS due_itens (
     codigo_condicao_venda VARCHAR(3),
     exportacao_temporaria BOOLEAN
 );
+-- NOTA: Campo removido (não existe na API Siscomex):
+-- - exportador_nome
+-- API retorna apenas: numeroDoDocumento, tipoDoDocumento, estrangeiro, nacionalidade
+-- Para obter o nome do exportador, consulte a API da Receita Federal com o CNPJ/CPF
+
 CREATE INDEX IF NOT EXISTS idx_due_itens_numero_due ON due_itens(numero_due);
 CREATE INDEX IF NOT EXISTS idx_due_itens_ncm ON due_itens(ncm_codigo);
 """

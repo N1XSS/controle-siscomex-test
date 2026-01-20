@@ -278,10 +278,12 @@ Histórico de eventos da DUE.
 | `evento` | VARCHAR(150) | Descrição do evento |
 | `responsavel` | VARCHAR(100) | Responsável pelo evento |
 | `informacoes_adicionais` | TEXT | Informações adicionais |
-| `detalhes` | VARCHAR(400) | Detalhes do evento |
-| `motivo` | VARCHAR(150) | Motivo do evento |
-| `tipo_evento` | VARCHAR(50) | Tipo do evento |
-| `data` | TIMESTAMP | Data do evento |
+
+**Campos Removidos (2026-01-20):**
+- ~~`detalhes`~~ - Não existe na API Siscomex
+- ~~`motivo`~~ - Não existe na API Siscomex
+- ~~`tipo_evento`~~ - Não existe na API Siscomex
+- ~~`data`~~ - Redundante com `data_e_hora_do_evento`
 
 **Índices:**
 - `idx_due_eventos_numero_due` em `numero_due`
@@ -311,15 +313,17 @@ Itens da DUE.
 | `ncm_codigo` | VARCHAR(8) | Código NCM |
 | `ncm_descricao` | VARCHAR(500) | Descrição do NCM |
 | `ncm_unidade_medida_estatistica` | VARCHAR(20) | Unidade de medida estatística |
-| `exportador_numero_do_documento` | VARCHAR(20) | Número do documento do exportador |
-| `exportador_tipo_do_documento` | VARCHAR(20) | Tipo do documento |
-| `exportador_nome` | VARCHAR(150) | Nome do exportador |
+| `exportador_numero_do_documento` | VARCHAR(20) | Número do documento do exportador (CNPJ/CPF) |
+| `exportador_tipo_do_documento` | VARCHAR(20) | Tipo do documento (CNPJ/CPF) |
 | `exportador_estrangeiro` | BOOLEAN | Exportador é estrangeiro |
 | `exportador_nacionalidade_codigo` | INTEGER | Código da nacionalidade |
 | `exportador_nacionalidade_nome` | VARCHAR(50) | Nome da nacionalidade |
 | `exportador_nacionalidade_nome_resumido` | VARCHAR(5) | Nome resumido da nacionalidade |
 | `codigo_condicao_venda` | VARCHAR(3) | Código da condição de venda (FOB, CIF, etc) |
 | `exportacao_temporaria` | BOOLEAN | Exportação temporária |
+
+**Campos Removidos (2026-01-20):**
+- ~~`exportador_nome`~~ - Não existe na API Siscomex. Para obter o nome, consulte a API da Receita Federal com o CNPJ/CPF.
 
 **Índices:**
 - `idx_due_itens_numero_due` em `numero_due`

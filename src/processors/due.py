@@ -19,7 +19,7 @@ from src.core.logger import logger
 from src.api.siscomex.token import token_manager
 warnings.filterwarnings('ignore')
 
-# Flag para usar PostgreSQL ou CSV
+# Flag para usar PostgreSQL (OBRIGATÓRIO - CSV removido)
 USAR_POSTGRESQL = True
 
 # Carregar variáveis de ambiente do arquivo .env
@@ -28,30 +28,25 @@ load_dotenv(ENV_CONFIG_FILE)
 # Configurações da API Siscomex
 URL_DUE_BASE = "https://portalunico.siscomex.gov.br/due/api/ext/due"
 
-def ler_chaves_nf(arquivo_csv: str = 'dados/nfe-sap.csv') -> list[str]:
-    """Lê as chaves de NF do CSV gerado pelo SAP"""
+def ler_chaves_nf() -> list[str]:
+    """Lê as chaves de NF do PostgreSQL
+
+    DEPRECATED: Use src.sync.new_dues.carregar_nfs_sap() ao invés desta função.
+    """
+    logger.warning("[DEPRECATED] Função ler_chaves_nf() está obsoleta")
+    logger.info("[INFO] Use src.sync.new_dues.carregar_nfs_sap() para carregar NFs do PostgreSQL")
+
+    if not db_manager.conn:
+        db_manager.conectar()
+
     try:
-        if not os.path.exists(arquivo_csv):
-            logger.info(f"❌ Arquivo {arquivo_csv} não encontrado")
-            logger.info("Execute primeiro o código de consulta SAP HANA (sap-nf.py)")
-            return []
-        
-        df = pd.read_csv(arquivo_csv, sep=';', encoding='utf-8-sig')
-        
-        if 'Chave NF' not in df.columns:
-            logger.info("❌ Coluna 'Chave NF' não encontrada no CSV")
-            return []
-        
-        # Filtrar apenas chaves válidas (não vazias e não nulas)
-        chaves = df['Chave NF'].dropna().astype(str)
-        chaves = chaves[chaves.str.len() > 40]  # Chaves NF têm 44 dígitos
-        chaves = chaves.unique().tolist()
-        
-        logger.info(f"📋 {len(chaves)} chaves de NF únicas encontradas")
-        return chaves
-        
+        chaves = db_manager.obter_nfs_sap()
+        if chaves:
+            logger.info(f"📋 {len(chaves)} chaves de NF carregadas do PostgreSQL")
+            return chaves
+        return []
     except Exception as e:
-        logger.info(f"❌ Erro ao ler CSV: {e}")
+        logger.error(f"❌ Erro ao ler chaves NF: {e}")
         return []
 
 def processar_dados_due(
@@ -194,8 +189,8 @@ def processar_dados_due(
             'evento': evento.get('evento', ''),
             'responsavel': evento.get('responsavel', ''),
             'informacoesAdicionais': evento.get('informacoesAdicionais', ''),
-            'detalhes': evento.get('detalhes', ''),
-            'motivo': evento.get('motivo', '')
+            # REMOVIDO: 'detalhes' e 'motivo' - Campos não disponíveis na API Siscomex
+            # API retorna apenas: dataEHoraDoEvento, evento, responsavel, informacoesAdicionais (opcional)
         }
         dados_normalizados['due_eventos_historico'].append(evento_row)
     
@@ -227,7 +222,9 @@ def processar_dados_due(
             # Exportador
             'exportador_numeroDoDocumento': item.get('exportador', {}).get('numeroDoDocumento', ''),
             'exportador_tipoDoDocumento': item.get('exportador', {}).get('tipoDoDocumento', ''),
-            'exportador_nome': item.get('exportador', {}).get('nome', ''),
+            # CAMPO REMOVIDO: 'exportador_nome' - Campo não disponível na API Siscomex
+            # API retorna apenas numeroDoDocumento e tipoDoDocumento
+            # Se necessário, o nome pode ser obtido consultando API da Receita com o CNPJ
             'exportador_estrangeiro': item.get('exportador', {}).get('estrangeiro', False),
             'exportador_nacionalidade_codigo': item.get('exportador', {}).get('nacionalidade', {}).get('codigo', 0),
             'exportador_nacionalidade_nome': item.get('exportador', {}).get('nacionalidade', {}).get('nome', ''),
@@ -1069,32 +1066,28 @@ def processar_chave_individual(args: tuple) -> dict[str, Any] | None:
             logger.info(f"❌ [THREAD] Erro no processamento da chave {chave_nf[:20]}: {str(e)[:50]}")
         return None
 
-def carregar_cache_due_siscomex(arquivo: str = 'dados/due-siscomex.csv') -> dict[str, str]:
-    """Carrega cache de chaves NF -> DUE do arquivo due-siscomex.csv existente"""
-    cache_nf_due = {}
-    
-    if not os.path.exists(arquivo):
-        logger.info("📄 Arquivo due-siscomex.csv não encontrado - processamento completo será necessário")
-        return cache_nf_due
-    
+def carregar_cache_due_siscomex() -> dict[str, str]:
+    """
+    DEPRECATED: Carrega cache de chaves NF -> DUE do PostgreSQL
+
+    Esta função foi atualizada para usar PostgreSQL ao invés de CSV.
+    Use src.sync.new_dues.carregar_vinculos_existentes() ao invés desta função.
+    """
+    logger.warning("[DEPRECATED] Função carregar_cache_due_siscomex() está obsoleta")
+    logger.info("[INFO] Use src.sync.new_dues.carregar_vinculos_existentes() para carregar vínculos do PostgreSQL")
+
+    if not db_manager.conn:
+        db_manager.conectar()
+
     try:
-        df = pd.read_csv(arquivo, sep=';', encoding='utf-8-sig')
-        
-        if 'Chave NF' in df.columns and 'DU-E' in df.columns:
-            for _, row in df.iterrows():
-                chave_nf = str(row['Chave NF']).strip()
-                numero_due = str(row['DU-E']).strip()
-                if chave_nf and numero_due:
-                    cache_nf_due[chave_nf] = numero_due
-            
-            logger.info(f"📋 Cache carregado: {len(cache_nf_due)} relações Chave NF → DUE do arquivo existente")
-        else:
-            logger.info("⚠️  Arquivo due-siscomex.csv existe mas não tem as colunas esperadas")
-            
+        vinculos = db_manager.obter_vinculos()
+        if vinculos:
+            logger.info(f"📋 Cache carregado: {len(vinculos)} relações Chave NF → DUE do PostgreSQL")
+            return vinculos
+        return {}
     except Exception as e:
-        logger.info(f"⚠️  Erro ao carregar cache do due-siscomex.csv: {e}")
-    
-    return cache_nf_due
+        logger.error(f"⚠️  Erro ao carregar cache: {e}")
+        return {}
 
 def processar_chaves_nf(
     chaves_nf: list[str],
@@ -1358,20 +1351,14 @@ def salvar_resultados_normalizados(
         modo_incremental: Mantido para compatibilidade (sempre faz upsert no PostgreSQL)
     """
     
-    if not USAR_POSTGRESQL:
-        # Fallback para CSV (codigo antigo)
-        _salvar_resultados_normalizados_csv(dados_normalizados, pasta, modo_incremental)
-        return
-    
     logger.info(f"\n💾 Salvando dados normalizados no PostgreSQL...")
     logger.info("-" * 50)
-    
+
     # Conectar ao banco se nao estiver conectado
     if not db_manager.conn:
         if not db_manager.conectar():
-            logger.error("[ERRO] Falha ao conectar ao PostgreSQL, tentando CSV como fallback...")
-            _salvar_resultados_normalizados_csv(dados_normalizados, pasta, modo_incremental)
-            return
+            logger.error("[ERRO] Falha ao conectar ao PostgreSQL")
+            raise RuntimeError("Não foi possível conectar ao PostgreSQL para salvar dados")
     
     # Contar registros por tabela
     total_registros = 0
@@ -1399,103 +1386,27 @@ def _salvar_resultados_normalizados_csv(
     modo_incremental: bool = True,
 ) -> None:
     """
-    Salva todos os dados normalizados em CSVs separados (fallback).
+    DEPRECATED: Função removida. Use apenas PostgreSQL.
+
+    Esta função foi removida porque o sistema agora usa exclusivamente PostgreSQL.
     """
-    
-    # Garantir que a pasta existe
-    if not os.path.exists(pasta):
-        os.makedirs(pasta)
-    
-    logger.info(f"\n💾 Salvando dados normalizados em: {pasta}")
-    logger.info("-" * 50)
-    
-    # Chaves primarias por tabela para evitar duplicatas
-    chaves_primarias = {
-        'due_principal': ['numero'],
-        'due_eventos_historico': ['numero_due', 'data', 'tipoEvento'],
-        'due_itens': ['numero_due', 'numeroItem'],
-        'due_item_enquadramentos': ['numero_due', 'numeroItem', 'codigo'],
-        'due_item_paises_destino': ['numero_due', 'numeroItem', 'codigoPaisDestino'],
-        'due_item_tratamentos_administrativos': ['numero_due', 'numeroItem', 'codigoLPCO'],
-        'due_item_tratamentos_administrativos_orgaos': ['numero_due', 'numeroItem', 'codigoLPCO', 'codigoOrgao'],
-        'due_item_notas_remessa': ['numero_due', 'numeroItem', 'chaveDeAcesso'],
-        'due_item_nota_fiscal_exportacao': ['numero_due', 'chaveDeAcesso'],
-        'due_item_notas_complementares': ['numero_due', 'numeroItem', 'chaveDeAcesso'],
-        'due_item_atributos': ['numero_due', 'numeroItem', 'codigo'],
-        'due_item_documentos_importacao': ['numero_due', 'numeroItem', 'numero'],
-        'due_item_documentos_transformacao': ['numero_due', 'numeroItem', 'numero'],
-        'due_item_calculo_tributario_tratamentos': ['numero_due', 'numeroItem'],
-        'due_item_calculo_tributario_quadros': ['numero_due', 'numeroItem', 'codigoQuadro'],
-        'due_situacoes_carga': ['numero_due', 'sequencial'],
-        'due_solicitacoes': ['numero_due', 'tipoSolicitacao', 'dataSolicitacao'],
-        'due_declaracao_tributaria_compensacoes': ['numero_due', 'codigoReceita'],
-        'due_declaracao_tributaria_recolhimentos': ['numero_due', 'codigoReceita'],
-        'due_declaracao_tributaria_contestacoes': ['numero_due'],
-        'due_atos_concessorios_suspensao': ['numero_due', 'numero']
-    }
-    
-    for tabela, dados in dados_normalizados.items():
-        arquivo = os.path.join(pasta, f"{tabela}.csv")
-        
-        if not dados:
-            logger.info(f"   ⚠️  {tabela}.csv → Sem dados novos")
-            continue
-        
-        df_novo = pd.DataFrame(dados)
-        df_final = df_novo  # Default
-        
-        # Se modo incremental e arquivo existe, fazer merge
-        if modo_incremental and os.path.exists(arquivo):
-            try:
-                df_existente = pd.read_csv(arquivo, sep=';', encoding='utf-8-sig')
-                chaves = chaves_primarias.get(tabela, ['numero_due'])
-                chaves_validas = [c for c in chaves if c in df_novo.columns and c in df_existente.columns]
-                
-                if chaves_validas:
-                    df_existente['_chave_temp'] = df_existente[chaves_validas].astype(str).agg('|'.join, axis=1)
-                    df_novo['_chave_temp'] = df_novo[chaves_validas].astype(str).agg('|'.join, axis=1)
-                    df_existente = df_existente[~df_existente['_chave_temp'].isin(df_novo['_chave_temp'])]
-                    df_existente = df_existente.drop(columns=['_chave_temp'])
-                    df_novo = df_novo.drop(columns=['_chave_temp'])
-                    df_final = pd.concat([df_existente, df_novo], ignore_index=True)
-                else:
-                    df_final = pd.concat([df_existente, df_novo], ignore_index=True)
-                
-                logger.info(f"   ✅ {tabela}.csv → {len(df_novo)} novos + {len(df_existente)} existentes = {len(df_final)} total")
-            except Exception as e:
-                logger.info(f"   ⚠️  {tabela}.csv → Erro ao fazer merge: {e}, sobrescrevendo")
-                df_final = df_novo
-        else:
-            logger.info(f"   ✅ {tabela}.csv → {len(df_final)} registros")
-        
-        df_final.to_csv(arquivo, sep=';', index=False, encoding='utf-8-sig')
-    
-    logger.info("-" * 50)
-    logger.info(f"📊 Total de tabelas salvas: {len([t for t, d in dados_normalizados.items() if d])}")
+    raise NotImplementedError(
+        "Salvamento em CSV foi removido. "
+        "O sistema agora usa exclusivamente PostgreSQL. "
+        "Verifique a conexão com o banco de dados."
+    )
 
 
 def salvar_resultados(resultados: list[dict[str, Any]], arquivo: str = 'dados/due-siscomex.csv') -> None:
-    """Salva os resultados básicos em CSV (compatibilidade)"""
-    if not resultados:
-        logger.info("⚠️  Nenhum resultado para salvar")
-        return
-    
-    try:
-        # Garantir que a pasta existe
-        pasta = os.path.dirname(arquivo)
-        if pasta and not os.path.exists(pasta):
-            os.makedirs(pasta)
-        
-        # Criar DataFrame e salvar
-        df = pd.DataFrame(resultados)
-        df.to_csv(arquivo, sep=';', index=False, encoding='utf-8-sig')
-        
-        logger.info(f"\n💾 Dados básicos salvos em: {arquivo}")
-        logger.info(f"   Total de registros: {len(df)}")
-        logger.info(f"   Colunas: {', '.join(df.columns.tolist())}")
-        
-    except Exception as e:
-        logger.info(f"❌ Erro ao salvar CSV: {e}")
+    """
+    DEPRECATED: Função removida. Use apenas PostgreSQL.
+
+    Esta função foi removida porque o sistema agora usa exclusivamente PostgreSQL.
+    """
+    raise NotImplementedError(
+        "Salvamento de resultados em CSV foi removido. "
+        "O sistema agora usa exclusivamente PostgreSQL via salvar_resultados_normalizados()."
+    )
 
 def testar_normalizacao_due(
     client_id: str,

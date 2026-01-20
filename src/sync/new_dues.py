@@ -45,16 +45,18 @@ from src.core.exceptions import (
     SiscomexAPIError,
 )
 from src.api.siscomex.token import token_manager
+from src.processors.due import (
+    consultar_due_por_nf,
+    consultar_due_completa,
+    processar_dados_due,
+    salvar_resultados_normalizados,
+)
 
 warnings.filterwarnings("ignore")
 load_dotenv(ENV_CONFIG_FILE)
 
-# Flag para usar PostgreSQL
+# Flag para usar PostgreSQL (OBRIGATÓRIO)
 USAR_POSTGRESQL = True
-
-# Caminhos dos arquivos (fallback CSV)
-CAMINHO_NFE_SAP = 'dados/nfe-sap.csv'
-CAMINHO_VINCULO = 'dados/nf_due_vinculo.csv'
 
 # URL base da API
 URL_DUE_BASE = "https://portalunico.siscomex.gov.br/due/api/ext/due"
@@ -65,48 +67,30 @@ MAX_CONSULTAS_NF = MAX_CONSULTAS_NF_POR_EXECUCAO
 
 @timed
 def carregar_nfs_sap() -> list[str]:
-    """Carrega as chaves NF do PostgreSQL ou CSV.
+    """Carrega as chaves NF do PostgreSQL.
 
     Returns:
         Lista de chaves NF.
+
+    Raises:
+        RuntimeError: Se não conseguir conectar ao PostgreSQL.
     """
-    if USAR_POSTGRESQL:
-        if not db_manager.conn:
-            db_manager.conectar()
-        
-        if db_manager.conn:
-            try:
-                chaves = db_manager.obter_nfs_sap()
-                if chaves:
-                    logger.info(f"[INFO] {len(chaves)} chaves NF carregadas do PostgreSQL")
-                    return chaves
-            except Exception as e:
-                logger.warning(f"[AVISO] Erro ao carregar NFs do PostgreSQL: {e}, tentando CSV...")
-    
-    # Fallback para CSV
-    if not os.path.exists(CAMINHO_NFE_SAP):
-        logger.warning(f"[AVISO] Arquivo {CAMINHO_NFE_SAP} nao encontrado")
-        logger.info("Execute primeiro: python -m src.api.athena.client")
-        return []
-    
+    if not db_manager.conn:
+        if not db_manager.conectar():
+            raise RuntimeError("[ERRO] Nao foi possivel conectar ao PostgreSQL")
+
     try:
-        df = pd.read_csv(CAMINHO_NFE_SAP, sep=';', encoding='utf-8-sig')
-        
-        col_chave = 'Chave NF' if 'Chave NF' in df.columns else 'KeyNfe'
-        if col_chave not in df.columns:
-            logger.error(f"[ERRO] Coluna de chave NF nao encontrada")
+        chaves = db_manager.obter_nfs_sap()
+        if chaves:
+            logger.info(f"[INFO] {len(chaves)} chaves NF carregadas do PostgreSQL")
+            return chaves
+        else:
+            logger.warning("[AVISO] Nenhuma NF encontrada no PostgreSQL")
+            logger.info("[INFO] Execute primeiro: python -m src.api.athena.client")
             return []
-        
-        chaves = df[col_chave].dropna().astype(str)
-        chaves = chaves[chaves.str.len() >= 44]
-        chaves = chaves.unique().tolist()
-        
-        logger.info(f"[INFO] {len(chaves)} chaves NF carregadas do CSV")
-        return chaves
-        
     except Exception as e:
-        logger.error(f"[ERRO] Erro ao carregar NFs do SAP: {e}")
-        return []
+        logger.error(f"[ERRO] Erro ao carregar NFs do PostgreSQL: {e}")
+        raise
 
 
 @timed
@@ -133,14 +117,17 @@ def carregar_vinculos_existentes() -> dict[str, str]:
 
 @timed
 def salvar_novos_vinculos(novos_vinculos: dict[str, str]) -> None:
-    """Salva novos vinculos NF->DUE no PostgreSQL.
+    """Salva novos vinculos NF->DUE no PostgreSQL com retry e reconexão.
 
     Args:
         novos_vinculos: Mapa {chave_nf: numero_due}.
+
+    Raises:
+        RuntimeError: Se não conseguir salvar após todas as tentativas.
     """
     if not novos_vinculos:
         return
-    
+
     agora = datetime.utcnow().isoformat()
     registros = [
         {
@@ -151,33 +138,37 @@ def salvar_novos_vinculos(novos_vinculos: dict[str, str]) -> None:
         }
         for chave_nf, numero_due in novos_vinculos.items()
     ]
-    
-    if db_manager.conn:
+
+    # Tentar salvar no PostgreSQL com retry e reconexão
+    max_tentativas = 3
+    for tentativa in range(max_tentativas):
         try:
+            # Verificar e reconectar se necessário
+            if not db_manager.conn or db_manager.conn.closed:
+                logger.info(f"[INFO] Reconectando ao banco (tentativa {tentativa + 1}/{max_tentativas})...")
+                if not db_manager.conectar():
+                    logger.warning(f"[AVISO] Falha ao reconectar (tentativa {tentativa + 1})")
+                    if tentativa < max_tentativas - 1:
+                        time.sleep(2)
+                        continue
+                    else:
+                        raise RuntimeError("Nao foi possivel reconectar ao banco apos todas as tentativas")
+
+            # Tentar inserir
             count = db_manager.inserir_vinculos_batch(registros)
             if count > 0:
-                logger.info(f"[OK] {count} novos vinculos salvos")
+                logger.info(f"[OK] {count} novos vinculos salvos no PostgreSQL")
                 return
+            else:
+                logger.warning(f"[AVISO] Nenhum vinculo foi salvo (tentativa {tentativa + 1})")
+
         except Exception as e:
-            logger.warning(f"[AVISO] Erro ao salvar vinculos: {e}")
-    
-    # Fallback para CSV
-    try:
-        os.makedirs('dados', exist_ok=True)
-        
-        # Carregar existentes e adicionar novos
-        if os.path.exists(CAMINHO_VINCULO):
-            df_existente = pd.read_csv(CAMINHO_VINCULO, sep=';', encoding='utf-8-sig')
-            df_novo = pd.DataFrame(registros)
-            df = pd.concat([df_existente, df_novo], ignore_index=True)
-        else:
-            df = pd.DataFrame(registros)
-        
-        df.to_csv(CAMINHO_VINCULO, sep=';', index=False, encoding='utf-8-sig')
-        logger.info(f"[OK] {len(novos_vinculos)} vinculos salvos em CSV")
-        
-    except Exception as e:
-        logger.error(f"[ERRO] Erro ao salvar vinculo CSV: {e}")
+            logger.warning(f"[AVISO] Erro ao salvar vinculos (tentativa {tentativa + 1}/{max_tentativas}): {e}")
+            if tentativa < max_tentativas - 1:
+                time.sleep(2)
+                continue
+            else:
+                raise RuntimeError(f"Falha ao salvar vinculos apos {max_tentativas} tentativas: {e}") from e
 
 
 @timed
@@ -323,13 +314,10 @@ def processar_novas_nfs() -> None:
             raise SiscomexAPIError("Falha na autenticacao")
         
         logger.info("[OK] Autenticado com sucesso!")
-        
-        # 5. Importar funcoes
-        try:
-            from src.processors.due import consultar_due_por_nf, processar_dados_due, salvar_resultados_normalizados, consultar_due_completa
-        except ImportError as e:
-            raise DUEProcessingError(f"Nao foi possivel importar due_processor: {e}") from e
-        
+
+        # 5. Validar imports (já importados no topo do arquivo)
+        # Imports movidos para o escopo global para evitar NameError em funções paralelas
+
         # 6. Consultar DUEs para NFs sem vinculo
         novos_vinculos = {}
         dues_para_baixar = set()

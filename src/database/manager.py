@@ -733,9 +733,9 @@ class DatabaseManager:
             )
         
         # Inserir novos
-        colunas = ['numero_due', 'data_e_hora_do_evento', 'evento', 'responsavel', 
-                   'informacoes_adicionais', 'detalhes', 'motivo', 'tipo_evento', 'data']
-        
+        # NOTA: Campos removidos (não existem na API Siscomex): detalhes, motivo, tipo_evento, data
+        colunas = ['numero_due', 'data_e_hora_do_evento', 'evento', 'responsavel', 'informacoes_adicionais']
+
         dados = []
         for r in registros:
             dados.append((
@@ -743,11 +743,7 @@ class DatabaseManager:
                 self._limpar_valor(r.get('dataEHoraDoEvento'), 'timestamp'),
                 self._limpar_valor(r.get('evento')),
                 self._limpar_valor(r.get('responsavel')),
-                self._limpar_valor(r.get('informacoesAdicionais')),
-                self._limpar_valor(r.get('detalhes')),
-                self._limpar_valor(r.get('motivo')),
-                self._limpar_valor(r.get('tipoEvento')),
-                self._limpar_valor(r.get('data'), 'timestamp')
+                self._limpar_valor(r.get('informacoesAdicionais'))
             ))
         
         query = f"""
