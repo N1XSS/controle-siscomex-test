@@ -20,6 +20,7 @@ import argparse
 import os
 import time
 import warnings
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
 from typing import Any
 
@@ -28,6 +29,8 @@ from dotenv import load_dotenv
 
 from src.core.constants import (
     DEFAULT_HTTP_TIMEOUT_SEC,
+    DUE_DOWNLOAD_WORKERS,
+    ENABLE_PARALLEL_DOWNLOADS,
     ENV_CONFIG_FILE,
     MAX_CONSULTAS_NF_POR_EXECUCAO,
     SISCOMEX_RATE_LIMIT_HOUR,
@@ -226,13 +229,49 @@ def consultar_dados_adicionais(numero_due: str) -> tuple[Any, Any, Any]:
     return atos_suspensao, atos_isencao, exigencias_fiscais
 
 
+def baixar_due_completa(numero_due: str) -> dict[str, Any] | None:
+    """
+    Baixa uma DUE completa com todos os dados adicionais.
+
+    Esta função é usada para processamento paralelo de DUEs.
+
+    Args:
+        numero_due: Número da DUE a ser baixada
+
+    Returns:
+        Dicionário com dados normalizados da DUE ou None em caso de erro
+    """
+    try:
+        # Consultar DUE principal
+        dados_due = consultar_due_completa(numero_due)
+
+        if not dados_due:
+            return None
+
+        # Consultar dados adicionais
+        atos_susp, atos_isen, exig = consultar_dados_adicionais(numero_due)
+
+        # Processar dados
+        dados_norm = processar_dados_due(dados_due, atos_susp, atos_isen, exig)
+
+        return dados_norm
+
+    except Exception as e:
+        logger.warning(f"Erro ao baixar DUE {numero_due}: {e}")
+        return None
+
+
 @timed
 def processar_novas_nfs() -> None:
     """Processa NFs do SAP que ainda nao tem DUE vinculada"""
     try:
         parser = argparse.ArgumentParser(description='Sincronizar novas NFs com DUEs')
         parser.add_argument('--limit', type=int, default=MAX_CONSULTAS_NF,
-                            help=f'Limite de NFs para consultar (default: {MAX_CONSULTAS_NF})')
+                        help=f'Limite de NFs para consultar (default: {MAX_CONSULTAS_NF})')
+        parser.add_argument('--workers', type=int, default=5,
+                        help='Numero de workers paralelos para consultas (default: 5)')
+        parser.add_argument('--workers-download', type=int, default=DUE_DOWNLOAD_WORKERS,
+                        help=f'Numero de workers paralelos para download de DUEs (default: {DUE_DOWNLOAD_WORKERS})')
         args = parser.parse_args()
         
         logger.info("=" * 60)
@@ -300,20 +339,30 @@ def processar_novas_nfs() -> None:
         
         nfs_sem_due_encontrada = 0
         
-        for i, chave_nf in enumerate(nfs_sem_vinculo[:max_consultas], 1):
-            if i % 50 == 0:
-                logger.info(f"  [PROGRESSO] {i}/{max_consultas} NFs consultadas...")
-            
-            resultado = consultar_due_por_nf(chave_nf)
-            numero_due = resultado.get('numero') if isinstance(resultado, dict) and resultado else None
-            
-            if numero_due:
-                novos_vinculos[chave_nf] = numero_due
-                dues_para_baixar.add(numero_due)
+        def consultar_nf(chave: str) -> tuple[str, str | None]:
+            resultado = consultar_due_por_nf(chave)
+            if isinstance(resultado, dict) and resultado:
+                numero = resultado.get('DU-E') or resultado.get('numero')
             else:
-                nfs_sem_due_encontrada += 1
-            
-            time.sleep(0.2)
+                numero = None
+            return chave, numero
+
+        with ThreadPoolExecutor(max_workers=max(1, args.workers)) as executor:
+            future_to_nf = {
+                executor.submit(consultar_nf, chave_nf): chave_nf
+                for chave_nf in nfs_sem_vinculo[:max_consultas]
+            }
+
+            for i, future in enumerate(as_completed(future_to_nf), 1):
+                if i % 50 == 0 or i == max_consultas:
+                    logger.info(f"  [PROGRESSO] {i}/{max_consultas} NFs consultadas...")
+
+                chave_nf, numero_due = future.result()
+                if numero_due:
+                    novos_vinculos[chave_nf] = numero_due
+                    dues_para_baixar.add(numero_due)
+                else:
+                    nfs_sem_due_encontrada += 1
         
         logger.info(f"\n[INFO] {len(novos_vinculos)} novos vinculos encontrados")
         logger.info(f"[INFO] {nfs_sem_due_encontrada} NFs sem DUE no Siscomex")
@@ -355,20 +404,50 @@ def processar_novas_nfs() -> None:
             
             dues_ok = 0
             dues_erro = 0
-            
-            for i, numero_due in enumerate(dues_para_baixar, 1):
-                if i % 10 == 0:
-                    logger.info(f"  [PROGRESSO] {i}/{len(dues_para_baixar)} DUEs...")
-                
-                dados_due = consultar_due_completa(numero_due)
-                
-                if dados_due:
-                    # Consultar dados adicionais
-                    atos_susp, atos_isen, exig = consultar_dados_adicionais(numero_due)
-                    
-                    # Processar dados
-                    dados_norm = processar_dados_due(dados_due, atos_susp, atos_isen, exig)
-                    
+
+            # Usar processamento paralelo se habilitado
+            if ENABLE_PARALLEL_DOWNLOADS and len(dues_para_baixar) > 1:
+                max_workers = max(1, args.workers_download)
+                logger.info(f"  Baixando DUEs em paralelo com {max_workers} workers...")
+
+                with ThreadPoolExecutor(max_workers=max_workers) as executor:
+                    # Submeter todas as DUEs para download paralelo
+                    future_to_due = {
+                        executor.submit(baixar_due_completa, numero_due): numero_due
+                        for numero_due in dues_para_baixar
+                    }
+
+                    # Processar resultados conforme completam
+                    for i, future in enumerate(as_completed(future_to_due), 1):
+                        numero_due = future_to_due[future]
+
+                        if i % 10 == 0:
+                            logger.info(f"  [PROGRESSO] {i}/{len(dues_para_baixar)} DUEs...")
+
+                        try:
+                            dados_norm = future.result()
+
+                            if dados_norm:
+                                for tabela, dados in dados_norm.items():
+                                    if tabela in dados_consolidados:
+                                        dados_consolidados[tabela].extend(dados)
+                                dues_ok += 1
+                            else:
+                                dues_erro += 1
+
+                        except Exception as e:
+                            logger.warning(f"Erro ao processar DUE {numero_due}: {e}")
+                            dues_erro += 1
+            else:
+                # Fallback para processamento sequencial (se desabilitado ou uma única DUE)
+                logger.info("  Baixando DUEs sequencialmente...")
+
+                for i, numero_due in enumerate(dues_para_baixar, 1):
+                    if i % 10 == 0:
+                        logger.info(f"  [PROGRESSO] {i}/{len(dues_para_baixar)} DUEs...")
+
+                    dados_norm = baixar_due_completa(numero_due)
+
                     if dados_norm:
                         for tabela, dados in dados_norm.items():
                             if tabela in dados_consolidados:
@@ -376,10 +455,8 @@ def processar_novas_nfs() -> None:
                         dues_ok += 1
                     else:
                         dues_erro += 1
-                else:
-                    dues_erro += 1
-                
-                time.sleep(0.3)
+
+                    time.sleep(0.3)
             
             logger.info(f"\n[OK] {dues_ok} DUEs baixadas com sucesso")
             if dues_erro > 0:
@@ -393,17 +470,33 @@ def processar_novas_nfs() -> None:
         logger.info("\n" + "=" * 60)
         logger.info("SINCRONIZACAO CONCLUIDA")
         logger.info("=" * 60)
-        
+
         logger.info(f"\n[RESUMO]")
         logger.info(f"  NFs no SAP: {len(nfs_sap)}")
         logger.info(f"  Vinculos existentes (cache): {len(vinculos_existentes)}")
         logger.info(f"  NFs consultadas: {max_consultas}")
         logger.info(f"  Novos vinculos: {len(novos_vinculos)}")
         logger.info(f"  DUEs baixadas: {len(dues_para_baixar)}")
-        
+
         if len(nfs_sem_vinculo) > max_consultas:
             restantes = len(nfs_sem_vinculo) - max_consultas
             logger.info(f"\n[INFO] Restam {restantes} NFs para processar na proxima execucao")
+
+        # Salvar estatísticas para notificação WhatsApp
+        try:
+            import json
+            stats_file = '.sync_stats_novas.json'
+            stats_data = {
+                'novos_vinculos': len(novos_vinculos),
+                'dues_baixadas': len(dues_para_baixar),
+                'nfs_consultadas': max_consultas,
+                'dues_sucesso': dues_ok,
+                'dues_erro': dues_erro,
+            }
+            with open(stats_file, 'w', encoding='utf-8') as f:
+                json.dump(stats_data, f)
+        except Exception as e:
+            logger.debug(f"Erro ao salvar estatísticas: {e}")
     except ControleSiscomexError as exc:
         logger.error("[ERRO] %s", exc)
     except Exception as exc:

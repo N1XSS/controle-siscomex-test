@@ -102,6 +102,7 @@ python -m src.main
 CLI:
 ```bash
 python -m src.main --novas
+python -m src.main --novas --workers 10
 python -m src.main --atualizar
 python -m src.main --completo
 python -m src.main --atualizar-due 24BR0008165929

@@ -31,6 +31,12 @@ HORAS_PARA_ATUALIZACAO = 24
 DIAS_AVERBACAO_RECENTE = 7
 
 # =============================================================================
+# PARALELIZAÇÃO DE DOWNLOADS
+# =============================================================================
+DUE_DOWNLOAD_WORKERS = 5  # Número de threads paralelas para download de DUEs
+ENABLE_PARALLEL_DOWNLOADS = True  # Feature flag para ativar/desativar paralelização
+
+# =============================================================================
 # TIMEOUTS E RETRIES
 # =============================================================================
 DB_CONNECTION_TIMEOUT_SEC = 30
@@ -87,3 +93,14 @@ ATHENA_QUERY_RESULT_LOCATION = "s3://aws-athena-query-results-default/"
 # STATUS E INTERVALOS LOCAIS
 # =============================================================================
 DEFAULT_DB_STATUS_INTERVAL_HOURS = 24
+
+# =============================================================================
+# WHATSAPP NOTIFICATIONS (EVOLUTION API)
+# =============================================================================
+import os
+
+WHATSAPP_ENABLED = os.getenv('WHATSAPP_ENABLED', 'false').lower() == 'true'
+WHATSAPP_BASE_URL = os.getenv('WHATSAPP_BASE_URL', '')
+WHATSAPP_INSTANCE = os.getenv('WHATSAPP_INSTANCE', '')
+WHATSAPP_APIKEY = os.getenv('WHATSAPP_APIKEY', '')
+WHATSAPP_REMOTE_JID = os.getenv('WHATSAPP_REMOTE_JID', '')  # Número direto do destinatário

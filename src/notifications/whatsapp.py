@@ -96,21 +96,86 @@ def notify_sync_complete(sync_type: str, stats: Optional[Dict[str, Any]] = None)
 
     Args:
         sync_type: Tipo de sincronização (completo, novas, atualizar, etc.)
-        stats: Dicionário com estatísticas da execução:
-            - novos_vinculos: Número de novos vínculos criados
-            - dues_atualizadas: Número de DUEs atualizadas
-            - tempo_execucao: Tempo de execução (formato HH:MM:SS)
-            - timestamp: Timestamp de conclusão
+        stats: Dicionário com estatísticas da execução
 
     Returns:
         True se notificação enviada com sucesso
     """
-    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    timestamp = datetime.now().strftime("%d/%m/%Y %H:%M:%S")
 
-    if stats:
+    if not stats:
+        message = f"✅ Sincronização concluída [{sync_type}]\n🕐 {timestamp}"
+        return send_notification(message)
+
+    tempo_execucao = stats.get("tempo_execucao", "N/A")
+
+    # Relatório para sincronização de NOVAS DUEs
+    if sync_type == "novas":
+        novos_vinculos = stats.get("novos_vinculos", 0)
+        dues_baixadas = stats.get("dues_baixadas", 0)
+        nfs_consultadas = stats.get("nfs_consultadas", 0)
+        dues_sucesso = stats.get("dues_sucesso", 0)
+        dues_erro = stats.get("dues_erro", 0)
+
+        message = (
+            f"✅ *Sincronização Novas DUEs Concluída*\n"
+            f"━━━━━━━━━━━━━━━━━━━━\n"
+            f"📊 *Resultados:*\n"
+            f"  • NFs consultadas: {nfs_consultadas}\n"
+            f"  • Novos vínculos: {novos_vinculos}\n"
+            f"  • DUEs baixadas: {dues_baixadas}\n"
+            f"  • Sucessos: {dues_sucesso}\n"
+            f"  • Erros: {dues_erro}\n"
+            f"⏱️ Tempo: {tempo_execucao}\n"
+            f"🕐 {timestamp}"
+        )
+
+    # Relatório para ATUALIZAÇÃO de DUEs existentes
+    elif sync_type == "atualizar":
+        dues_atualizadas = stats.get("dues_atualizadas", 0)
+        dues_ignoradas = stats.get("dues_ignoradas", 0)
+        dues_erro = stats.get("dues_erro", 0)
+        pendentes_ok = stats.get("pendentes_ok", 0)
+        averbadas_recentes_ok = stats.get("averbadas_recentes_ok", 0)
+        averbadas_antigas_mudou = stats.get("averbadas_antigas_mudou", 0)
+        req_economizadas = stats.get("requisicoes_economizadas", 0)
+
+        message = (
+            f"✅ *Atualização de DUEs Concluída*\n"
+            f"━━━━━━━━━━━━━━━━━━━━\n"
+            f"📊 *Resultados:*\n"
+            f"  • Atualizadas: {dues_atualizadas}\n"
+            f"  • Ignoradas (sem mudança): {dues_ignoradas}\n"
+            f"  • Erros: {dues_erro}\n\n"
+            f"📋 *Detalhes:*\n"
+            f"  • Pendentes: {pendentes_ok}\n"
+            f"  • Averbadas recentes: {averbadas_recentes_ok}\n"
+            f"  • Averbadas antigas: {averbadas_antigas_mudou}\n"
+            f"⚡ Requisições economizadas: ~{req_economizadas}\n"
+            f"⏱️ Tempo: {tempo_execucao}\n"
+            f"🕐 {timestamp}"
+        )
+
+    # Relatório para sincronização COMPLETA
+    elif sync_type == "completo":
+        # Combina dados de ambos os tipos
         novos_vinculos = stats.get("novos_vinculos", 0)
         dues_atualizadas = stats.get("dues_atualizadas", 0)
-        tempo_execucao = stats.get("tempo_execucao", "N/A")
+
+        message = (
+            f"✅ *Sincronização Completa Concluída*\n"
+            f"━━━━━━━━━━━━━━━━━━━━\n"
+            f"📊 *Resultados Gerais:*\n"
+            f"  • Novos vínculos: {novos_vinculos}\n"
+            f"  • DUEs atualizadas: {dues_atualizadas}\n"
+            f"⏱️ Tempo total: {tempo_execucao}\n"
+            f"🕐 {timestamp}"
+        )
+
+    else:
+        # Fallback genérico
+        novos_vinculos = stats.get("novos_vinculos", 0)
+        dues_atualizadas = stats.get("dues_atualizadas", 0)
 
         message = (
             f"✅ Sincronização concluída [{sync_type}]\n"
@@ -119,8 +184,6 @@ def notify_sync_complete(sync_type: str, stats: Optional[Dict[str, Any]] = None)
             f"⏱️ Tempo: {tempo_execucao}\n"
             f"🕐 {timestamp}"
         )
-    else:
-        message = f"✅ Sincronização concluída [{sync_type}] - {timestamp}"
 
     return send_notification(message)
 

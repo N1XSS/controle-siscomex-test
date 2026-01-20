@@ -15,6 +15,8 @@
 - Adicionados testes para `DatabaseManager` e helpers de `sync_novas`/`sync_atualizar`.
 - Removidos wrappers Python da raiz e padronizada a execucao via `python -m` com scripts atualizados.
 - Implementado rate limiter em token bucket para respeitar limites da API Siscomex com burst configuravel.
+- Adicionada consulta paralela de NFs no `sync.new_dues` com controle de workers.
+- Corrigida captura do numero da DUE retornado pela API (`DU-E`), evitando falsos negativos na vinculacao.
 
 ### 2026-01-17
 - Criado `constants.py` para centralizar valores usados pelo orquestrador (scripts, timeouts, intervalo de status).

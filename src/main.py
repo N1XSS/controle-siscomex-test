@@ -24,14 +24,17 @@ Uso:
 """
 
 import argparse
+import json
 import os
 import subprocess
 import sys
 from datetime import datetime
+from pathlib import Path
 
 from src.core.constants import (
     DEFAULT_DB_STATUS_INTERVAL_HOURS,
     DEFAULT_HTTP_TIMEOUT_SEC,
+    DUE_DOWNLOAD_WORKERS,
     ENV_CONFIG_FILE,
     SCRIPT_SAP,
     SCRIPT_SYNC_ATUALIZAR,
@@ -39,6 +42,7 @@ from src.core.constants import (
     SCRIPTS_DIR,
 )
 from src.core.logger import logger
+from src.notifications import notify_sync_start, notify_sync_complete, notify_sync_error
 
 
 def exibir_cabecalho() -> None:
@@ -119,18 +123,68 @@ def executar_modulo(modulo: str, args: list[str] | None = None) -> bool:
         return False
 
 
-def sincronizar_novas() -> None:
-    """Executa sincronizacao de novas DUEs."""
+def sincronizar_novas(workers_download: int | None = None) -> None:
+    """Executa sincronizacao de novas DUEs.
+
+    Args:
+        workers_download: Número de workers paralelos para downloads (None = usar default).
+    """
     logger.info("\n[SINCRONIZANDO NOVAS DUEs]")
     logger.info("-" * 40)
-    
-    # 1. Atualizar NFs do SAP
-    logger.info("\n[1/2] Consultando SAP para NFs de exportacao...")
-    executar_modulo(SCRIPT_SAP)
-    
-    # 2. Sincronizar novas DUEs
-    logger.info("\n[2/2] Sincronizando novas DUEs com Siscomex...")
-    executar_modulo(SCRIPT_SYNC_NOVAS)
+
+    # Notificar início
+    notify_sync_start("novas")
+
+    try:
+        inicio = datetime.now()
+
+        # 1. Atualizar NFs do SAP
+        logger.info("\n[1/2] Consultando SAP para NFs de exportacao...")
+        executar_modulo(SCRIPT_SAP)
+
+        # 2. Sincronizar novas DUEs
+        logger.info("\n[2/2] Sincronizando novas DUEs com Siscomex...")
+        args = []
+        if workers_download is not None:
+            args.extend(['--workers-download', str(workers_download)])
+        resultado = executar_modulo(SCRIPT_SYNC_NOVAS, args if args else None)
+
+        # Calcular tempo de execução
+        fim = datetime.now()
+        duracao = fim - inicio
+        tempo_formatado = str(duracao).split('.')[0]  # Remove microssegundos
+
+        # Ler estatísticas do arquivo gerado pelo script
+        stats = {
+            "tempo_execucao": tempo_formatado,
+        }
+
+        stats_file = '.sync_stats_novas.json'
+        if os.path.exists(stats_file):
+            try:
+                with open(stats_file, 'r', encoding='utf-8') as f:
+                    file_stats = json.load(f)
+                    stats.update({
+                        "novos_vinculos": file_stats.get('novos_vinculos', 0),
+                        "dues_baixadas": file_stats.get('dues_baixadas', 0),
+                        "nfs_consultadas": file_stats.get('nfs_consultadas', 0),
+                        "dues_sucesso": file_stats.get('dues_sucesso', 0),
+                        "dues_erro": file_stats.get('dues_erro', 0),
+                    })
+                # Limpar arquivo após leitura
+                os.remove(stats_file)
+            except Exception as e:
+                logger.debug(f"Erro ao ler estatísticas: {e}")
+
+        if resultado:
+            # Notificar conclusão com sucesso
+            notify_sync_complete("novas", stats)
+        else:
+            notify_sync_error("novas", "O processo retornou código de erro")
+
+    except Exception as e:
+        logger.error(f"[ERRO] Falha na sincronização: {e}")
+        notify_sync_error("novas", str(e))
 
 
 def atualizar_due_especifica(numero_due: str) -> None:
@@ -434,34 +488,107 @@ def atualizar_drawback(dues_str: str | None = None, todas: bool = False) -> None
         traceback.print_exc()
 
 
-def atualizar_existentes(force: bool = False, limit: int | None = None) -> None:
+def atualizar_existentes(force: bool = False, limit: int | None = None, workers_download: int | None = None) -> None:
     """Executa atualizacao de DUEs existentes.
 
     Args:
         force: Quando True, atualiza todas as DUEs.
         limit: Limita a quantidade de atualizacoes.
+        workers_download: Número de workers paralelos para downloads (None = usar default).
     """
     logger.info("\n[ATUALIZANDO DUEs EXISTENTES]")
     logger.info("-" * 40)
-    
-    args = []
-    if force:
-        args.append('--force')
-    if limit:
-        args.extend(['--limit', str(limit)])
-    executar_modulo(SCRIPT_SYNC_ATUALIZAR, args)
+
+    # Notificar início
+    notify_sync_start("atualizar")
+
+    try:
+        inicio = datetime.now()
+
+        args = []
+        if force:
+            args.append('--force')
+        if limit:
+            args.extend(['--limit', str(limit)])
+        if workers_download is not None:
+            args.extend(['--workers-download', str(workers_download)])
+        resultado = executar_modulo(SCRIPT_SYNC_ATUALIZAR, args if args else None)
+
+        # Calcular tempo de execução
+        fim = datetime.now()
+        duracao = fim - inicio
+        tempo_formatado = str(duracao).split('.')[0]  # Remove microssegundos
+
+        # Ler estatísticas do arquivo gerado pelo script
+        stats = {
+            "tempo_execucao": tempo_formatado,
+            "novos_vinculos": 0,  # Atualização não cria novos vínculos
+        }
+
+        stats_file = '.sync_stats_atualizar.json'
+        if os.path.exists(stats_file):
+            try:
+                with open(stats_file, 'r', encoding='utf-8') as f:
+                    file_stats = json.load(f)
+                    stats.update({
+                        "dues_atualizadas": file_stats.get('dues_atualizadas', 0),
+                        "dues_ignoradas": file_stats.get('dues_ignoradas', 0),
+                        "dues_erro": file_stats.get('dues_erro', 0),
+                        "pendentes_ok": file_stats.get('pendentes_ok', 0),
+                        "averbadas_recentes_ok": file_stats.get('averbadas_recentes_ok', 0),
+                        "averbadas_antigas_mudou": file_stats.get('averbadas_antigas_mudou', 0),
+                        "requisicoes_economizadas": file_stats.get('requisicoes_economizadas', 0),
+                    })
+                # Limpar arquivo após leitura
+                os.remove(stats_file)
+            except Exception as e:
+                logger.debug(f"Erro ao ler estatísticas: {e}")
+
+        if resultado:
+            # Notificar conclusão com sucesso
+            notify_sync_complete("atualizar", stats)
+        else:
+            notify_sync_error("atualizar", "O processo retornou código de erro")
+
+    except Exception as e:
+        logger.error(f"[ERRO] Falha na atualização: {e}")
+        notify_sync_error("atualizar", str(e))
 
 
-def sincronizacao_completa() -> None:
-    """Executa sincronizacao completa (novas + atualizacao)."""
+def sincronizacao_completa(workers_download: int | None = None) -> None:
+    """Executa sincronizacao completa (novas + atualizacao).
+
+    Args:
+        workers_download: Número de workers paralelos para downloads (None = usar default).
+    """
     logger.info("\n[SINCRONIZACAO COMPLETA]")
     logger.info("=" * 60)
-    
-    # 1. Sincronizar novas
-    sincronizar_novas()
-    
-    # 2. Atualizar existentes
-    atualizar_existentes()
+
+    # Notificar início
+    notify_sync_start("completo")
+
+    try:
+        inicio = datetime.now()
+
+        # As funções individuais já enviam suas próprias notificações
+        # Então não enviaremos notificação duplicada aqui
+
+        # 1. Sincronizar novas
+        sincronizar_novas(workers_download=workers_download)
+
+        # 2. Atualizar existentes
+        atualizar_existentes(workers_download=workers_download)
+
+        # Calcular tempo de execução total
+        fim = datetime.now()
+        duracao = fim - inicio
+        tempo_formatado = str(duracao).split('.')[0]  # Remove microssegundos
+
+        logger.info(f"\n⏱️ Tempo total da sincronização completa: {tempo_formatado}")
+
+    except Exception as e:
+        logger.error(f"[ERRO] Falha na sincronização completa: {e}")
+        notify_sync_error("completo", str(e))
     
     logger.info("\n" + "=" * 60)
     logger.info("[SINCRONIZACAO COMPLETA FINALIZADA]")
@@ -639,7 +766,9 @@ Exemplos:
                         help='Exibir status do sistema')
     parser.add_argument('--gerar-scripts', action='store_true',
                         help='Gerar scripts de agendamento')
-    
+    parser.add_argument('--workers-download', type=int, default=DUE_DOWNLOAD_WORKERS,
+                        help=f'Numero de workers paralelos para download de DUEs (default: {DUE_DOWNLOAD_WORKERS})')
+
     args = parser.parse_args()
     
     # Se nenhum argumento, mostrar menu interativo
@@ -660,11 +789,11 @@ Exemplos:
         else:
             atualizar_drawback(dues_str=args.atualizar_drawback)
     elif args.novas:
-        sincronizar_novas()
+        sincronizar_novas(workers_download=args.workers_download)
     elif args.atualizar:
-        atualizar_existentes()
+        atualizar_existentes(workers_download=args.workers_download)
     elif args.completo:
-        sincronizacao_completa()
+        sincronizacao_completa(workers_download=args.workers_download)
     elif args.gerar_scripts:
         gerar_script_agendamento()
 

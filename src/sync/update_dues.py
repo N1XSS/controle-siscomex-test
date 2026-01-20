@@ -35,6 +35,8 @@ from dotenv import load_dotenv
 from src.core.constants import (
     DEFAULT_HTTP_TIMEOUT_SEC,
     DIAS_AVERBACAO_RECENTE,
+    DUE_DOWNLOAD_WORKERS,
+    ENABLE_PARALLEL_DOWNLOADS,
     ENV_CONFIG_FILE,
     HORAS_PARA_ATUALIZACAO,
     HTTP_REQUEST_TIMEOUT_SEC,
@@ -304,6 +306,42 @@ def consultar_dados_adicionais(
     return atos_suspensao, atos_isencao, exigencias_fiscais
 
 
+def baixar_due_pendente_completa(due_info: dict[str, Any]) -> dict[str, Any] | None:
+    """
+    Baixa dados completos de uma DUE pendente/recente.
+
+    Esta função é usada para processamento paralelo de DUEs pendentes/recentes.
+
+    Args:
+        due_info: Dicionário com informações da DUE (chave 'numero')
+
+    Returns:
+        Dicionário com dados normalizados da DUE ou None em caso de erro
+    """
+    try:
+        from src.processors.due import processar_dados_due, consultar_due_completa
+
+        numero_due = due_info['numero']
+
+        # Consultar DUE principal
+        dados_due = consultar_due_completa(numero_due)
+
+        if not dados_due:
+            return None
+
+        # Consultar dados adicionais
+        atos_susp, atos_isen, exig = consultar_dados_adicionais(numero_due, dados_due)
+
+        # Processar dados
+        dados_norm = processar_dados_due(dados_due, atos_susp, atos_isen, exig)
+
+        return dados_norm
+
+    except Exception as e:
+        logger.warning(f"Erro ao baixar DUE {due_info.get('numero', 'DESCONHECIDA')}: {e}")
+        return None
+
+
 @timed
 def processar_due_averbada_antiga(due_info: dict[str, Any]) -> dict[str, Any]:
     """Processa DUE averbada antiga.
@@ -482,10 +520,12 @@ def atualizar_dues() -> None:
     """Processo principal de atualizacao de DUEs."""
     try:
         parser = argparse.ArgumentParser(description='Atualizar DUEs existentes')
-        parser.add_argument('--force', action='store_true', 
+        parser.add_argument('--force', action='store_true',
                             help='Forca atualizacao de todas as DUEs')
-        parser.add_argument('--limit', type=int, 
+        parser.add_argument('--limit', type=int,
                             help='Limite de DUEs para atualizar')
+        parser.add_argument('--workers-download', type=int, default=DUE_DOWNLOAD_WORKERS,
+                            help=f'Numero de workers paralelos para download de DUEs (default: {DUE_DOWNLOAD_WORKERS})')
         args = parser.parse_args()
         
         logger.info("=" * 60)
@@ -580,25 +620,67 @@ def atualizar_dues() -> None:
         # 5. Processar DUEs PENDENTES (atualizar direto)
         dues_pendentes = dues_info['pendentes'] + dues_info['averbadas_recentes']
         if dues_pendentes:
-            logger.info(f"\n[FASE 1] Atualizando {len(dues_pendentes)} DUEs pendentes/recentes...")
-            
-            for i, due_info in enumerate(dues_pendentes, 1):
-                numero_due = due_info['numero']
-                
-                if i % 25 == 0:
-                    logger.info(f"  [PROGRESSO] {i}/{len(dues_pendentes)}...")
-                
-                dados_due = consultar_due_completa(numero_due)
-                
-                if dados_due:
-                    atos_susp, atos_isen, exig = consultar_dados_adicionais(numero_due, dados_due)
-                    dados_norm = processar_dados_due(dados_due, atos_susp, atos_isen, exig)
-                    
+            # Usar processamento paralelo se habilitado
+            if ENABLE_PARALLEL_DOWNLOADS and len(dues_pendentes) > 1:
+                max_workers = max(1, args.workers_download)
+                logger.info(f"\n[FASE 1] Atualizando {len(dues_pendentes)} DUEs pendentes/recentes (PARALELO: {max_workers} workers)...")
+
+                with ThreadPoolExecutor(max_workers=max_workers) as executor:
+                    # Submeter todas as DUEs para download paralelo
+                    future_to_due = {
+                        executor.submit(baixar_due_pendente_completa, due_info): due_info
+                        for due_info in dues_pendentes
+                    }
+
+                    # Processar resultados conforme completam
+                    for i, future in enumerate(as_completed(future_to_due), 1):
+                        due_info = future_to_due[future]
+                        numero_due = due_info['numero']
+
+                        if i % 25 == 0:
+                            logger.info(f"  [PROGRESSO] {i}/{len(dues_pendentes)}...")
+
+                        try:
+                            dados_norm = future.result()
+
+                            if dados_norm:
+                                for tabela, dados in dados_norm.items():
+                                    if tabela in dados_consolidados:
+                                        dados_consolidados[tabela].extend(dados)
+
+                                if due_info in dues_info['pendentes']:
+                                    stats['pendentes_ok'] += 1
+                                else:
+                                    stats['averbadas_recentes_ok'] += 1
+                            else:
+                                if due_info in dues_info['pendentes']:
+                                    stats['pendentes_erro'] += 1
+                                else:
+                                    stats['averbadas_recentes_erro'] += 1
+
+                        except Exception as e:
+                            logger.warning(f"Erro ao processar DUE {numero_due}: {e}")
+                            if due_info in dues_info['pendentes']:
+                                stats['pendentes_erro'] += 1
+                            else:
+                                stats['averbadas_recentes_erro'] += 1
+            else:
+                # Fallback para processamento sequencial (se desabilitado ou uma única DUE)
+                logger.info(f"\n[FASE 1] Atualizando {len(dues_pendentes)} DUEs pendentes/recentes (SEQUENCIAL)...")
+
+                for i, due_info in enumerate(dues_pendentes, 1):
+                    numero_due = due_info['numero']
+
+                    if i % 25 == 0:
+                        logger.info(f"  [PROGRESSO] {i}/{len(dues_pendentes)}...")
+
+                    dados_norm = baixar_due_pendente_completa(due_info)
+
                     if dados_norm:
                         for tabela, dados in dados_norm.items():
                             if tabela in dados_consolidados:
                                 dados_consolidados[tabela].extend(dados)
-                        
+
                         if due_info in dues_info['pendentes']:
                             stats['pendentes_ok'] += 1
                         else:
@@ -608,13 +690,8 @@ def atualizar_dues() -> None:
                             stats['pendentes_erro'] += 1
                         else:
                             stats['averbadas_recentes_erro'] += 1
-                else:
-                    if due_info in dues_info['pendentes']:
-                        stats['pendentes_erro'] += 1
-                    else:
-                        stats['averbadas_recentes_erro'] += 1
-                
-                time.sleep(0.3)
+
+                    time.sleep(0.3)
         
         # 6. Processar DUEs AVERBADAS ANTIGAS (verificar antes) - PARALELO
         dues_sem_mudanca = []
@@ -685,7 +762,25 @@ def atualizar_dues() -> None:
         
         requisicoes_economizadas = total_ignoradas * 3  # 3 req extras por DUE que nao precisou atualizar
         logger.info(f"\n  [OTIMIZACAO] ~{requisicoes_economizadas} requisicoes economizadas!")
-        
+
+        # Salvar estatísticas para notificação WhatsApp
+        try:
+            import json
+            stats_file = '.sync_stats_atualizar.json'
+            stats_data = {
+                'dues_atualizadas': total_ok,
+                'dues_ignoradas': total_ignoradas,
+                'dues_erro': total_erros,
+                'pendentes_ok': stats['pendentes_ok'],
+                'averbadas_recentes_ok': stats['averbadas_recentes_ok'],
+                'averbadas_antigas_mudou': stats['averbadas_antigas_mudou'],
+                'requisicoes_economizadas': requisicoes_economizadas,
+            }
+            with open(stats_file, 'w', encoding='utf-8') as f:
+                json.dump(stats_data, f)
+        except Exception as e:
+            logger.debug(f"Erro ao salvar estatísticas: {e}")
+
         # Exibir detalhes dos erros se houver
         if dues_com_erro:
             logger.info(f"\n  [DETALHES DOS ERROS] {len(dues_com_erro)} DUEs com erro:")
