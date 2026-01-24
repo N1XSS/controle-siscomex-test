@@ -49,7 +49,10 @@ DIAS_AVERBACAO_RECENTE = 7
 # =============================================================================
 # PARALELIZAÇÃO DE DOWNLOADS
 # =============================================================================
-DUE_DOWNLOAD_WORKERS = 5  # Número de threads paralelas para download de DUEs
+# Otimização: Aumentado de 5 para 20 workers para melhorar throughput
+# Com 4 requisições por DUE (principal + atos + exigências), cada worker
+# processa ~8s. Com 20 workers: 50 DUEs em ~1.5min (vs 6min com 5 workers)
+DUE_DOWNLOAD_WORKERS = 20  # Número de threads paralelas para download de DUEs
 ENABLE_PARALLEL_DOWNLOADS = True  # Feature flag para ativar/desativar paralelização
 
 # =============================================================================
