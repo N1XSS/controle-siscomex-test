@@ -47,8 +47,8 @@ Sistema profissional de integração com a API do Portal Único Siscomex, desenv
 
 - ✅ **Sincronização Inteligente**: Cache de vínculos NF→DUE evita consultas duplicadas
 - ✅ **Atualização Otimizada**: Compara `dataDeRegistro` antes de atualizar
-- ✅ **Rate Limiting Avançado**: Token bucket + detecção de bloqueio PUCX-ER1001
-- ✅ **Resiliência**: Retry com exponential backoff, cache de token persistente
+- ✅ **Rate Limiting Inteligente**: Detecta PUCX-ER1001 e pausa automaticamente (sem retry que aumenta penalidade)
+- ✅ **Resiliência**: Cache de token persistente, coordenação entre threads durante bloqueio
 - ✅ **Paralelização**: ThreadPoolExecutor para download simultâneo de DUEs
 - ✅ **Observabilidade**: Logging profissional com rotação, métricas de tempo
 
@@ -162,10 +162,11 @@ python -m src.main --status
 SISCOMEX_CLIENT_ID=seu_client_id_aqui
 SISCOMEX_CLIENT_SECRET=seu_client_secret_aqui
 
-# Rate Limits (1000 req/hora = padrão Siscomex)
-SISCOMEX_RATE_LIMIT_HOUR=1000
-SISCOMEX_RATE_LIMIT_BURST=20
-SISCOMEX_SAFE_REQUEST_LIMIT=900
+# Rate Limits (conforme docs.portalunico.siscomex.gov.br)
+# O sistema detecta PUCX-ER1001 e pausa automaticamente
+SISCOMEX_RATE_LIMIT_HOUR=1000      # Limite oficial por hora
+SISCOMEX_RATE_LIMIT_BURST=20       # Burst máximo (token bucket)
+SISCOMEX_SAFE_REQUEST_LIMIT=900    # Limite preventivo (pausa antes de atingir 1000)
 
 # Features opcionais
 SISCOMEX_FETCH_ATOS_SUSPENSAO=true
@@ -208,6 +209,50 @@ Se houver erro, você verá mensagens claras:
 
 ---
 
+## ⚡ Rate Limiting (Limites de Acesso)
+
+O sistema implementa rate limiting inteligente baseado na [documentação oficial do Siscomex](https://docs.portalunico.siscomex.gov.br/).
+
+### Limites da API
+
+| Configuração | Valor | Descrição |
+|--------------|-------|-----------|
+| `SISCOMEX_RATE_LIMIT_HOUR` | 1000 | Requisições permitidas por hora |
+| `SISCOMEX_SAFE_REQUEST_LIMIT` | 900 | Limite preventivo (pausa automática) |
+| `SISCOMEX_RATE_LIMIT_BURST` | 20 | Burst máximo (token bucket) |
+
+### Comportamento de Bloqueio (PUCX-ER1001)
+
+Quando o limite é atingido, o Siscomex retorna o erro `PUCX-ER1001`. O bloqueio é **progressivo**:
+
+| Violação | Penalidade |
+|----------|------------|
+| 1ª | Bloqueio até fim da hora atual |
+| 2ª | Hora atual + **1 hora adicional** |
+| 3ª+ | Hora atual + **2 horas adicionais** |
+
+> ⚠️ **IMPORTANTE**: Continuar fazendo requisições durante o bloqueio **aumenta a penalidade**!
+
+### Como o Sistema Lida com Bloqueios
+
+1. **Limite preventivo**: Pausa automaticamente ao atingir 900 req/h (antes do limite real de 1000)
+2. **Detecção de PUCX-ER1001**: Extrai o horário de desbloqueio da mensagem de erro
+3. **Pausa coordenada**: Todas as threads aguardam juntas até o desbloqueio
+4. **Sem retry automático**: Não tenta novamente durante bloqueio (evita aumentar penalidade)
+5. **Retomada automática**: Continua processamento após o horário de desbloqueio
+
+### Logs de Rate Limiting
+
+```
+⏸️  Limite preventivo SISCOMEX atingido (900 req/h). Aguardando 45.2 minutos...
+⏸️  Bloqueio SISCOMEX detectado (PUCX-ER1001).
+📋 Mensagem: Foi atingido o limite de 1000 acessos... liberado após as 15:00:00
+⏰ Aguardando até 15:00:00 (32.5 minutos)...
+✅ Periodo de bloqueio encerrado. Retomando operacoes.
+```
+
+---
+
 ## 📖 Uso
 
 ### Menu Interativo
@@ -238,8 +283,11 @@ Escolha uma opcao:
 #### Sincronizar Novas DUEs
 
 ```bash
-# Sincronização básica
+# Sincronização completa (processa todas as NFs, rate limiting automático)
 python -m src.main --novas
+
+# Com limite manual de NFs
+python -m src.main --novas --limit 200
 
 # Com 10 workers paralelos
 python -m src.main --novas --workers-download 10

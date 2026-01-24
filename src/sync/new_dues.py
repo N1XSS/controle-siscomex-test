@@ -9,11 +9,16 @@ Otimizacoes:
 - Cache de vinculos NF->DUE no PostgreSQL (nao reconsulta NFs ja vinculadas)
 - Agrupa NFs por DUE para evitar requisicoes duplicadas
 - Consulta dados adicionais (drawback suspensao/isencao, exigencias)
-- Respeita limite de 1000 req/hora do Siscomex
+- Rate limiting inteligente com pausa automatica ao detectar PUCX-ER1001
+
+Rate Limiting (docs.portalunico.siscomex.gov.br):
+- Limite: 1000 requisicoes/hora por funcionalidade
+- Bloqueio progressivo: 1a violacao = ate fim da hora, 2a = +1h, 3a+ = +2h
+- Sistema pausa automaticamente e retoma apos desbloqueio
 
 Uso:
-    python -m src.sync.new_dues
-    python -m src.sync.new_dues --limit 200  # Limita consultas
+    python -m src.sync.new_dues              # Processa todas (sem limite)
+    python -m src.sync.new_dues --limit 200  # Limita a 200 NFs
 """
 
 from __future__ import annotations
@@ -34,7 +39,6 @@ from src.core.constants import (
     DUE_DOWNLOAD_WORKERS,
     ENABLE_PARALLEL_DOWNLOADS,
     ENV_CONFIG_FILE,
-    MAX_CONSULTAS_NF_POR_EXECUCAO,
     SISCOMEX_FETCH_ATOS_ISENCAO,
     SISCOMEX_FETCH_ATOS_SUSPENSAO,
     SISCOMEX_FETCH_EXIGENCIAS_FISCAIS,
@@ -64,9 +68,6 @@ USAR_POSTGRESQL = True
 
 # URL base da API
 URL_DUE_BASE = "https://portalunico.siscomex.gov.br/due/api/ext/due"
-
-# Configuracoes
-MAX_CONSULTAS_NF = MAX_CONSULTAS_NF_POR_EXECUCAO
 
 
 def buscar_dados_complementares(
@@ -274,8 +275,8 @@ def processar_novas_nfs() -> None:
     """Processa NFs do SAP que ainda nao tem DUE vinculada"""
     try:
         parser = argparse.ArgumentParser(description='Sincronizar novas NFs com DUEs')
-        parser.add_argument('--limit', type=int, default=MAX_CONSULTAS_NF,
-                        help=f'Limite de NFs para consultar (default: {MAX_CONSULTAS_NF})')
+        parser.add_argument('--limit', type=int, default=0,
+                        help='Limite de NFs para consultar (0 = sem limite, processa todas)')
         parser.add_argument('--workers', type=int, default=5,
                         help='Numero de workers paralelos para consultas (default: 5)')
         parser.add_argument('--workers-download', type=int, default=DUE_DOWNLOAD_WORKERS,
@@ -338,9 +339,12 @@ def processar_novas_nfs() -> None:
         # 6. Consultar DUEs para NFs sem vinculo
         novos_vinculos = {}
         dues_para_baixar = set()
-        
-        max_consultas = min(len(nfs_sem_vinculo), args.limit)
+
+        # Se limit=0, processa todas as NFs (confia no rate limiting inteligente)
+        max_consultas = args.limit if args.limit > 0 else len(nfs_sem_vinculo)
         logger.info(f"\n[INFO] Consultando DUEs para {max_consultas} NFs...")
+        if args.limit == 0:
+            logger.info("[INFO] Modo sem limite ativado - rate limiting inteligente controlara pausas")
         
         nfs_sem_due_encontrada = 0
         

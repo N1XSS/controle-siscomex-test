@@ -78,6 +78,7 @@ class SharedTokenManager:
         self._request_window_start = self._current_window_start()
         self._requests_in_window = 0
         self._safe_request_limit = self._load_safe_request_limit()
+        self._blocked_until: datetime | None = None  # Horário de desbloqueio PUCX-ER1001
         
         self._setup_session()
         self._limiter = self._build_rate_limiter()
@@ -139,7 +140,23 @@ class SharedTokenManager:
         return max(0.0, (next_hour - now).total_seconds())
 
     def _wait_for_safe_limit(self) -> None:
-        """Pausa automaticamente quando atingir limite preventivo."""
+        """Pausa automaticamente quando atingir limite preventivo ou bloqueio ativo.
+
+        Verifica primeiro se há bloqueio PUCX-ER1001 ativo (para coordenar threads),
+        depois verifica o limite preventivo de requisições por hora.
+        """
+        # Verificar se está em período de bloqueio PUCX-ER1001
+        # Isso coordena todas as threads para aguardarem juntas
+        if self._blocked_until is not None:
+            wait = (self._blocked_until - datetime.now()).total_seconds()
+            if wait > 0:
+                logger.warning(
+                    "⏸️  Bloqueio SISCOMEX ativo. Aguardando %.1f minutos até %s...",
+                    wait / 60.0,
+                    self._blocked_until.strftime("%H:%M:%S"),
+                )
+                time.sleep(wait + 1)
+
         if self._safe_request_limit <= 0:
             return
 
@@ -206,23 +223,38 @@ class SharedTokenManager:
         return None
 
     def request(self, method: str, url: str, **kwargs) -> requests.Response:
-        """Executa requisicao respeitando rate limit configurado."""
-        max_tentativas = 3
-        ultima_resposta = None
+        """Executa requisicao respeitando rate limit configurado.
 
-        for _ in range(max_tentativas):
-            self._wait_for_safe_limit()
-            if self._limiter:
-                self._limiter.acquire()
+        IMPORTANTE: Quando detecta bloqueio PUCX-ER1001, aguarda o tempo indicado
+        mas NAO faz retry automatico. Conforme documentacao oficial do Siscomex,
+        cada tentativa durante bloqueio AUMENTA a penalidade:
+        - 1a violacao: bloqueio ate fim da hora atual
+        - 2a violacao: +1 hora de penalidade
+        - 3a+ violacao: +2 horas de penalidade
 
-            ultima_resposta = self.session.request(method, url, **kwargs)
-            wait_seconds = self._extract_rate_limit_wait(ultima_resposta)
-            if wait_seconds is None:
-                return ultima_resposta
+        A resposta de bloqueio é retornada para que o caller decida se quer
+        tentar novamente após o desbloqueio.
+        """
+        self._wait_for_safe_limit()
+        if self._limiter:
+            self._limiter.acquire()
 
+        resposta = self.session.request(method, url, **kwargs)
+
+        # Detectar bloqueio PUCX-ER1001
+        wait_seconds = self._extract_rate_limit_wait(resposta)
+        if wait_seconds is not None:
+            # Registrar horário de desbloqueio para coordenar outras threads
+            self._blocked_until = datetime.now() + timedelta(seconds=wait_seconds)
+            logger.info(
+                "⏳ Iniciando pausa de %.1f minutos. Proximas requisicoes aguardarao automaticamente.",
+                wait_seconds / 60.0,
+            )
             time.sleep(wait_seconds + 1)
+            self._blocked_until = None
+            logger.info("✅ Periodo de bloqueio encerrado. Retomando operacoes.")
 
-        return ultima_resposta
+        return resposta
     
     def configurar_credenciais(self, client_id: str, client_secret: str) -> None:
         """Configura as credenciais para autenticacao.

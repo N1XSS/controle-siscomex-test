@@ -41,7 +41,12 @@ SISCOMEX_FETCH_EXIGENCIAS_FISCAIS = os.getenv("SISCOMEX_FETCH_EXIGENCIAS_FISCAIS
 # =============================================================================
 # LIMITES DE PROCESSAMENTO
 # =============================================================================
-MAX_CONSULTAS_NF_POR_EXECUCAO = 400
+# MAX_CONSULTAS_NF_POR_EXECUCAO foi removido - o sistema agora confia no
+# rate limiting inteligente que detecta PUCX-ER1001 e pausa automaticamente.
+# Conforme docs.portalunico.siscomex.gov.br, o bloqueio é progressivo:
+# - 1a violação: bloqueio até fim da hora atual
+# - 2a violação: +1 hora de penalidade
+# - 3a+ violação: +2 horas de penalidade
 MAX_ATUALIZACOES_POR_EXECUCAO = 500
 HORAS_PARA_ATUALIZACAO = 24
 DIAS_AVERBACAO_RECENTE = 7
