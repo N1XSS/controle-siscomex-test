@@ -3,7 +3,9 @@
     "allow": [
       "mcp__Desktop_Commander__list_directory",
       "Bash(grep:*)",
-      "Bash(git add:*)"
+      "Bash(git add:*)",
+      "Bash(git commit:*)",
+      "Bash(wc:*)"
     ]
   }
 }
