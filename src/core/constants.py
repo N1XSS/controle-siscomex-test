@@ -1,10 +1,18 @@
 """Constantes compartilhadas pelo sistema."""
 
+from __future__ import annotations
+
+import os
 from pathlib import Path
+
+from dotenv import load_dotenv
 
 PROJECT_ROOT = Path(__file__).resolve().parent
 
 ENV_CONFIG_FILE = "config.env"
+
+# Carregar variaveis do .env antes de ler configuracoes
+load_dotenv(ENV_CONFIG_FILE)
 SCRIPTS_DIR = "scripts"
 
 SCRIPT_SAP = "src.api.athena.client"
@@ -16,11 +24,19 @@ LOGS_DIR = "logs"
 # =============================================================================
 # LIMITES DE API SISCOMEX
 # =============================================================================
-SISCOMEX_RATE_LIMIT_HOUR = 1000
-SISCOMEX_RATE_LIMIT_BURST = 20
+SISCOMEX_RATE_LIMIT_HOUR = int(os.getenv("SISCOMEX_RATE_LIMIT_HOUR", "1000"))
+SISCOMEX_RATE_LIMIT_BURST = int(os.getenv("SISCOMEX_RATE_LIMIT_BURST", "20"))
 SISCOMEX_TOKEN_VALIDITY_MIN = 60
 SISCOMEX_TOKEN_SAFETY_MARGIN_MIN = 2
 SISCOMEX_AUTH_INTERVAL_SEC = 60
+SISCOMEX_SAFE_REQUEST_LIMIT = int(os.getenv("SISCOMEX_SAFE_REQUEST_LIMIT", "900"))
+
+# =============================================================================
+# CONSULTAS SUPLEMENTARES DUE
+# =============================================================================
+SISCOMEX_FETCH_ATOS_SUSPENSAO = os.getenv("SISCOMEX_FETCH_ATOS_SUSPENSAO", "true").lower() == "true"
+SISCOMEX_FETCH_ATOS_ISENCAO = os.getenv("SISCOMEX_FETCH_ATOS_ISENCAO", "false").lower() == "true"
+SISCOMEX_FETCH_EXIGENCIAS_FISCAIS = os.getenv("SISCOMEX_FETCH_EXIGENCIAS_FISCAIS", "true").lower() == "true"
 
 # =============================================================================
 # LIMITES DE PROCESSAMENTO
@@ -97,7 +113,6 @@ DEFAULT_DB_STATUS_INTERVAL_HOURS = 24
 # =============================================================================
 # WHATSAPP NOTIFICATIONS (EVOLUTION API)
 # =============================================================================
-import os
 
 WHATSAPP_ENABLED = os.getenv('WHATSAPP_ENABLED', 'false').lower() == 'true'
 WHATSAPP_BASE_URL = os.getenv('WHATSAPP_BASE_URL', '')

@@ -1,6 +1,9 @@
+from __future__ import annotations
+
 import json
 import os
 import pickle
+import re
 import sys
 import threading
 import time
@@ -19,6 +22,7 @@ from src.core.constants import (
     SISCOMEX_AUTH_INTERVAL_SEC,
     SISCOMEX_RATE_LIMIT_BURST,
     SISCOMEX_RATE_LIMIT_HOUR,
+    SISCOMEX_SAFE_REQUEST_LIMIT,
     SISCOMEX_TOKEN_SAFETY_MARGIN_MIN,
 )
 from src.core.logger import logger
@@ -30,8 +34,9 @@ load_dotenv(ENV_CONFIG_FILE)
 if sys.platform == 'win32':
     try:
         sys.stdout.reconfigure(encoding='utf-8')
-    except:
-        pass  # Se não conseguir reconfigurar, continua normalmente
+    except (AttributeError, OSError):
+        # Se não conseguir reconfigurar, continua normalmente
+        pass
 
 # Configuracoes da API
 URL_AUTH = "https://portalunico.siscomex.gov.br/portal/api/autenticar/chave-acesso"
@@ -69,6 +74,10 @@ class SharedTokenManager:
         self.client_id = None
         self.client_secret = None
         self.ultima_autenticacao = None  # Controle de intervalo mínimo de 60s
+        self._request_lock = threading.Lock()
+        self._request_window_start = self._current_window_start()
+        self._requests_in_window = 0
+        self._safe_request_limit = self._load_safe_request_limit()
         
         self._setup_session()
         self._limiter = self._build_rate_limiter()
@@ -111,11 +120,109 @@ class SharedTokenManager:
         rate_per_sec = limit_hour / 3600.0
         return TokenBucket(rate_per_sec=rate_per_sec, capacity=burst)
 
+    def _load_safe_request_limit(self) -> int:
+        """Carrega limite preventivo de requisicoes por hora."""
+        try:
+            return int(os.getenv("SISCOMEX_SAFE_REQUEST_LIMIT", SISCOMEX_SAFE_REQUEST_LIMIT))
+        except ValueError:
+            return SISCOMEX_SAFE_REQUEST_LIMIT
+
+    def _current_window_start(self) -> datetime:
+        """Retorna o inicio da janela da hora atual."""
+        now = datetime.now()
+        return now.replace(minute=0, second=0, microsecond=0)
+
+    def _seconds_until_next_hour(self) -> float:
+        """Calcula segundos restantes para a proxima hora cheia."""
+        now = datetime.now()
+        next_hour = now.replace(minute=0, second=0, microsecond=0) + timedelta(hours=1)
+        return max(0.0, (next_hour - now).total_seconds())
+
+    def _wait_for_safe_limit(self) -> None:
+        """Pausa automaticamente quando atingir limite preventivo."""
+        if self._safe_request_limit <= 0:
+            return
+
+        while True:
+            with self._request_lock:
+                now = datetime.now()
+                if now >= self._request_window_start + timedelta(hours=1):
+                    self._request_window_start = self._current_window_start()
+                    self._requests_in_window = 0
+
+                if self._requests_in_window < self._safe_request_limit:
+                    self._requests_in_window += 1
+                    return
+
+                wait_seconds = self._seconds_until_next_hour()
+                logger.warning(
+                    "⏸️  Limite preventivo SISCOMEX atingido (%s req/h). Aguardando %.1f minutos...",
+                    self._safe_request_limit,
+                    wait_seconds / 60.0,
+                )
+
+            time.sleep(wait_seconds + 1)
+
+    def _parse_block_until(self, message: str) -> datetime | None:
+        """Extrai horário de desbloqueio da mensagem PUCX-ER1001."""
+        match = re.search(r"após as (\d{1,2}):(\d{2})(?::(\d{2}))?", message)
+        if not match:
+            return None
+
+        hour = int(match.group(1))
+        minute = int(match.group(2))
+        second = int(match.group(3) or 0)
+        now = datetime.now()
+        desbloqueio = now.replace(hour=hour, minute=minute, second=second, microsecond=0)
+        if desbloqueio <= now:
+            desbloqueio += timedelta(days=1)
+        return desbloqueio
+
+    def _extract_rate_limit_wait(self, response: requests.Response) -> float | None:
+        """Detecta bloqueio PUCX-ER1001 e retorna segundos de espera."""
+        try:
+            data = response.json()
+        except Exception:
+            return None
+
+        if isinstance(data, dict) and data.get("code") == "PUCX-ER1001":
+            message = data.get("message", "")
+            desbloqueio = self._parse_block_until(message)
+            if desbloqueio:
+                wait_seconds = max(0.0, (desbloqueio - datetime.now()).total_seconds())
+            else:
+                wait_seconds = self._seconds_until_next_hour()
+
+            logger.warning("⏸️  Bloqueio SISCOMEX detectado (PUCX-ER1001).")
+            if message:
+                logger.warning("📋 Mensagem: %s", message)
+            logger.warning(
+                "⏰ Aguardando até %s (%.1f minutos)...",
+                desbloqueio.strftime("%H:%M:%S") if desbloqueio else "próxima hora",
+                wait_seconds / 60.0,
+            )
+            return wait_seconds
+
+        return None
+
     def request(self, method: str, url: str, **kwargs) -> requests.Response:
         """Executa requisicao respeitando rate limit configurado."""
-        if self._limiter:
-            self._limiter.acquire()
-        return self.session.request(method, url, **kwargs)
+        max_tentativas = 3
+        ultima_resposta = None
+
+        for _ in range(max_tentativas):
+            self._wait_for_safe_limit()
+            if self._limiter:
+                self._limiter.acquire()
+
+            ultima_resposta = self.session.request(method, url, **kwargs)
+            wait_seconds = self._extract_rate_limit_wait(ultima_resposta)
+            if wait_seconds is None:
+                return ultima_resposta
+
+            time.sleep(wait_seconds + 1)
+
+        return ultima_resposta
     
     def configurar_credenciais(self, client_id: str, client_secret: str) -> None:
         """Configura as credenciais para autenticacao.

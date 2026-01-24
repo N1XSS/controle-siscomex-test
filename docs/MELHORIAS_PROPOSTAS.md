@@ -8,6 +8,13 @@
 
 ## Progresso das Melhorias
 
+### 2026-01-22
+- Adicionadas flags configuraveis para consultas suplementares (atos suspensao/isencao/exigencias).
+- Implementada pausa automatica por limite preventivo de requisicoes e tratamento do bloqueio PUCX-ER1001.
+- Removidos delays manuais redundantes nas rotinas de sincronizacao.
+- Ajustado uso de pool de conexoes para evitar `connection already closed`.
+- Atualizados `config.env` e `config_exemplo.env` com novas variaveis.
+
 ### 2026-01-19
 - Ajustado `DatabaseManager` para usar o pool via context manager em operacoes de banco, devolvendo conexoes quando abertas internamente.
 - Adicionado `use_connection()` para permitir operacoes batch com `self.conn` consistente no escopo.

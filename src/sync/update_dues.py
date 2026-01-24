@@ -18,11 +18,12 @@ Uso:
     python -m src.sync.update_dues --limit 100  # Limita quantidade de atualizacoes
 """
 
+from __future__ import annotations
+
 import argparse
 import os
 import sys
 import threading
-import time
 import warnings
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timedelta
@@ -41,10 +42,12 @@ from src.core.constants import (
     HORAS_PARA_ATUALIZACAO,
     HTTP_REQUEST_TIMEOUT_SEC,
     MAX_ATUALIZACOES_POR_EXECUCAO,
+    SISCOMEX_FETCH_ATOS_ISENCAO,
+    SISCOMEX_FETCH_ATOS_SUSPENSAO,
+    SISCOMEX_FETCH_EXIGENCIAS_FISCAIS,
     SITUACOES_AVERBADAS,
     SITUACOES_CANCELADAS,
     SITUACOES_PENDENTES,
-    SISCOMEX_RATE_LIMIT_HOUR,
 )
 from src.database.manager import db_manager
 from src.core.logger import logger
@@ -66,8 +69,44 @@ USAR_POSTGRESQL = True
 # URL base da API
 URL_DUE_BASE = "https://portalunico.siscomex.gov.br/due/api/ext/due"
 
-# Configuracoes adicionais
-REQUISICOES_POR_SEGUNDO = max(SISCOMEX_RATE_LIMIT_HOUR / 3600, 0.1)
+
+def buscar_dados_complementares(
+    numero_due: str,
+    tipo: str,
+    url: str,
+) -> dict | list | None:
+    """Busca dados complementares da DUE (atos concessórios ou exigências fiscais).
+
+    Args:
+        numero_due: Número da DUE
+        tipo: Tipo de dados ('atos_suspensao', 'atos_isencao', 'exigencias_fiscais')
+        url: URL completa do endpoint
+
+    Returns:
+        Dados JSON retornados pela API ou None em caso de erro
+    """
+    try:
+        response = token_manager.request(
+            "GET",
+            url,
+            headers=token_manager.obter_headers(),
+            timeout=DEFAULT_HTTP_TIMEOUT_SEC,
+        )
+        if response.status_code == 200:
+            dados = response.json()
+            return dados
+        else:
+            logger.warning(
+                f"[AVISO] Falha ao buscar {tipo} para DUE {numero_due}: "
+                f"HTTP {response.status_code}"
+            )
+            return None
+    except requests.exceptions.JSONDecodeError as e:
+        logger.warning(f"[AVISO] Erro ao decodificar JSON de {tipo}: {e}")
+        return None
+    except Exception as e:
+        logger.warning(f"[AVISO] Erro ao buscar {tipo}: {e}")
+        return None
 
 
 @timed
@@ -84,10 +123,7 @@ def carregar_dues_para_verificar(
     Returns:
         Dicionario com grupos de DUEs ou None.
     """
-    if not db_manager.conn:
-        db_manager.conectar()
-    
-    if not db_manager.conn:
+    if not db_manager.conectar():
         logger.error("[ERRO] Nao foi possivel conectar ao banco de dados")
         return None
     
@@ -98,32 +134,32 @@ def carregar_dues_para_verificar(
     }
     
     try:
-        cur = db_manager.conn.cursor()
-        
         agora = datetime.utcnow()
         limite_atualizacao = agora - timedelta(hours=HORAS_PARA_ATUALIZACAO)
         limite_averbacao_recente = agora - timedelta(days=DIAS_AVERBACAO_RECENTE)
-        
-        if forcar_todas:
-            # Modo forcado: todas as DUEs (exceto canceladas)
-            cur.execute("""
-                SELECT numero, situacao, data_de_registro, data_da_averbacao
-                FROM due_principal
-                WHERE situacao NOT IN %s
-                ORDER BY data_ultima_atualizacao ASC NULLS FIRST
-            """, (tuple(SITUACOES_CANCELADAS),))
-        else:
-            # Modo normal: filtrar por data de atualizacao
-            cur.execute("""
-                SELECT numero, situacao, data_de_registro, data_da_averbacao
-                FROM due_principal
-                WHERE situacao NOT IN %s
-                  AND (data_ultima_atualizacao IS NULL 
-                       OR data_ultima_atualizacao < %s)
-                ORDER BY data_ultima_atualizacao ASC NULLS FIRST
-            """, (tuple(SITUACOES_CANCELADAS), limite_atualizacao))
-        
-        rows = cur.fetchall()
+
+        with db_manager.get_connection() as conn:
+            with conn.cursor() as cur:
+                if forcar_todas:
+                    # Modo forcado: todas as DUEs (exceto canceladas)
+                    cur.execute("""
+                        SELECT numero, situacao, data_de_registro, data_da_averbacao
+                        FROM due_principal
+                        WHERE situacao NOT IN %s
+                        ORDER BY data_ultima_atualizacao ASC NULLS FIRST
+                    """, (tuple(SITUACOES_CANCELADAS),))
+                else:
+                    # Modo normal: filtrar por data de atualizacao
+                    cur.execute("""
+                        SELECT numero, situacao, data_de_registro, data_da_averbacao
+                        FROM due_principal
+                        WHERE situacao NOT IN %s
+                          AND (data_ultima_atualizacao IS NULL 
+                               OR data_ultima_atualizacao < %s)
+                        ORDER BY data_ultima_atualizacao ASC NULLS FIRST
+                    """, (tuple(SITUACOES_CANCELADAS), limite_atualizacao))
+
+                rows = cur.fetchall()
         
         for numero, situacao, data_registro, data_averbacao in rows:
             if situacao in SITUACOES_AVERBADAS:
@@ -263,46 +299,28 @@ def consultar_dados_adicionais(
     atos_suspensao = None
     atos_isencao = None
     exigencias_fiscais = None
-    
+
     # Atos de suspensao
-    try:
+    if SISCOMEX_FETCH_ATOS_SUSPENSAO:
         url = f"{URL_DUE_BASE}/{numero_due}/drawback/suspensao/atos-concessorios"
-        response = token_manager.request("GET", 
-            url,
-            headers=token_manager.obter_headers(),
-            timeout=DEFAULT_HTTP_TIMEOUT_SEC,
+        atos_suspensao = buscar_dados_complementares(
+            numero_due, "atos de suspensao", url
         )
-        if response.status_code == 200:
-            atos_suspensao = response.json()
-    except:
-        pass
-    
+
     # Atos de isencao
-    try:
+    if SISCOMEX_FETCH_ATOS_ISENCAO:
         url = f"{URL_DUE_BASE}/{numero_due}/drawback/isencao/atos-concessorios"
-        response = token_manager.request("GET", 
-            url,
-            headers=token_manager.obter_headers(),
-            timeout=DEFAULT_HTTP_TIMEOUT_SEC,
+        atos_isencao = buscar_dados_complementares(
+            numero_due, "atos de isencao", url
         )
-        if response.status_code == 200:
-            atos_isencao = response.json()
-    except:
-        pass
-    
+
     # Exigencias fiscais
-    try:
+    if SISCOMEX_FETCH_EXIGENCIAS_FISCAIS:
         url = f"{URL_DUE_BASE}/{numero_due}/exigencias-fiscais"
-        response = token_manager.request("GET", 
-            url,
-            headers=token_manager.obter_headers(),
-            timeout=DEFAULT_HTTP_TIMEOUT_SEC,
+        exigencias_fiscais = buscar_dados_complementares(
+            numero_due, "exigencias fiscais", url
         )
-        if response.status_code == 200:
-            exigencias_fiscais = response.json()
-    except:
-        pass
-    
+
     return atos_suspensao, atos_isencao, exigencias_fiscais
 
 
@@ -387,7 +405,6 @@ def processar_due_averbada_antiga(due_info: dict[str, Any]) -> dict[str, Any]:
         
         # Delay para rate limiting (respeitando limite de 1000 req/hora do Siscomex)
         # Com 5 workers e sleep de 0.5s: ~600 req/hora (seguro)
-        time.sleep(0.5)
         
     except Exception as e:
         resultado['erro'] = True
@@ -691,7 +708,6 @@ def atualizar_dues() -> None:
                         else:
                             stats['averbadas_recentes_erro'] += 1
 
-                    time.sleep(0.3)
         
         # 6. Processar DUEs AVERBADAS ANTIGAS (verificar antes) - PARALELO
         dues_sem_mudanca = []

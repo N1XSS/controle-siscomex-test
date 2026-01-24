@@ -104,6 +104,40 @@ python -m src.main --atualizar-drawback                  # Todas com atos
 - Inclui `due_exigencias_fiscais`
 - DROP atualizado com novas tabelas
 
+#### 9. Rate Limit Inteligente + Pausa Automatica
+
+**Arquivo**: `src/api/siscomex/token.py`
+
+**Funcionalidade**:
+- Contador preventivo de requisicoes por hora (limite configuravel)
+- Pausa automatica ate a proxima hora quando atinge o limite
+- Tratamento do erro `PUCX-ER1001` com espera automatica
+
+**Configuracao**:
+- `SISCOMEX_SAFE_REQUEST_LIMIT=900` (default)
+
+#### 10. Consultas Suplementares Configuraveis
+
+**Arquivos**: `src/sync/new_dues.py`, `src/sync/update_dues.py`, `src/main.py`, `src/processors/due.py`
+
+**Funcionalidade**:
+- Atos de suspensao, isencao e exigencias fiscais controlados por flags
+- Reduz requisicoes por DUE conforme necessidade
+
+**Configuracao**:
+- `SISCOMEX_FETCH_ATOS_SUSPENSAO=true`
+- `SISCOMEX_FETCH_ATOS_ISENCAO=false`
+- `SISCOMEX_FETCH_EXIGENCIAS_FISCAIS=true`
+
+#### 11. Conexao PostgreSQL via Pool (sem conexao longa)
+
+**Arquivos**: `src/database/manager.py`, `src/sync/new_dues.py`, `src/sync/update_dues.py`, `src/main.py`, `src/api/athena/client.py`
+
+**Funcionalidade**:
+- Uso consistente de pool e context manager
+- Evita erro `connection already closed` em syncs longos
+
+
 ---
 
 ## Estatísticas de Otimização

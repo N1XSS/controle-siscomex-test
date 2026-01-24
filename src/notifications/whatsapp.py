@@ -1,8 +1,10 @@
 """Cliente para notificações WhatsApp via Evolution API."""
 
+from __future__ import annotations
+
 import requests
 from datetime import datetime
-from typing import Optional, Dict, Any
+from typing import Any
 from src.core.constants import (
     WHATSAPP_ENABLED,
     WHATSAPP_BASE_URL,
@@ -90,7 +92,7 @@ def notify_sync_start(sync_type: str) -> bool:
     return send_notification(message)
 
 
-def notify_sync_complete(sync_type: str, stats: Optional[Dict[str, Any]] = None) -> bool:
+def notify_sync_complete(sync_type: str, stats: dict[str, Any] | None = None) -> bool:
     """
     Notifica conclusão da sincronização com estatísticas.
 

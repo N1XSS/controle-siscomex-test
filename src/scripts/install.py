@@ -3,6 +3,8 @@
 Script de instalação e configuração do Sistema de Controle de DU-Es
 """
 
+from __future__ import annotations
+
 import os
 import sys
 import subprocess

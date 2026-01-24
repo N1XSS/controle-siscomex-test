@@ -33,6 +33,8 @@ Tabelas Suporte:
 - suporte_pais, suporte_moeda, suporte_enquadramento, etc.
 """
 
+from __future__ import annotations
+
 from src.core.logger import logger
 
 

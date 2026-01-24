@@ -13,6 +13,8 @@ Uso:
     python -m src.api.athena.client
 """
 
+from __future__ import annotations
+
 import os
 import time
 import warnings
@@ -316,10 +318,9 @@ def salvar_nfs(df: pd.DataFrame | None) -> bool:
     chaves = df[col_chave].dropna().astype(str).unique().tolist()
     
     # Conectar ao PostgreSQL
-    if not db_manager.conn:
-        if not db_manager.conectar():
-            logger.error("[ERRO] Nao foi possivel conectar ao PostgreSQL")
-            return False
+    if not db_manager.conectar():
+        logger.error("[ERRO] Nao foi possivel conectar ao PostgreSQL")
+        return False
     
     try:
         count = db_manager.inserir_nf_sap(chaves)
@@ -357,8 +358,7 @@ def main() -> None:
     logger.info("=" * 60)
     
     # Desconectar do PostgreSQL
-    if db_manager.conn:
-        db_manager.desconectar()
+    db_manager.desconectar()
     
     return df
 

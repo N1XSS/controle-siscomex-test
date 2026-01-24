@@ -1,5 +1,7 @@
 """Custom exceptions for Controle Siscomex."""
 
+from __future__ import annotations
+
 
 class ControleSiscomexError(Exception):
     """Base exception for system errors."""

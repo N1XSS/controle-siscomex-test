@@ -1,7 +1,8 @@
+from __future__ import annotations
+
 import json
 import os
 import threading
-import time
 import warnings
 from typing import Any
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -13,7 +14,12 @@ from dotenv import load_dotenv
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 
-from src.core.constants import DEFAULT_HTTP_TIMEOUT_SEC, ENV_CONFIG_FILE, HTTP_REQUEST_TIMEOUT_SEC
+from src.core.constants import (
+    DEFAULT_HTTP_TIMEOUT_SEC,
+    ENV_CONFIG_FILE,
+    HTTP_REQUEST_TIMEOUT_SEC,
+    SISCOMEX_FETCH_ATOS_SUSPENSAO,
+)
 from src.database.manager import db_manager
 from src.core.logger import logger
 from src.api.siscomex.token import token_manager
@@ -36,8 +42,9 @@ def ler_chaves_nf() -> list[str]:
     logger.warning("[DEPRECATED] Função ler_chaves_nf() está obsoleta")
     logger.info("[INFO] Use src.sync.new_dues.carregar_nfs_sap() para carregar NFs do PostgreSQL")
 
-    if not db_manager.conn:
-        db_manager.conectar()
+    if not db_manager.conectar():
+        logger.error("❌ Falha ao conectar ao PostgreSQL")
+        return []
 
     try:
         chaves = db_manager.obter_nfs_sap()
@@ -737,25 +744,33 @@ def consultar_due_por_nf(chave_nf: str, debug_mode: bool = False) -> dict[str, A
         dados_completos = dados2
         
         # Consultar atos concessórios de suspensão se disponível
-        # OTIMIZAÇÃO: Esta consulta adicional é mantida pois é específica para drawback
+        # OTIMIZAÇÃO: Esta consulta adicional é opcional via flag.
         atos_concessorios = None
-        link_atos_suspensao = dados_completos.get('atosConcessoriosSuspensao', {})
-        if isinstance(link_atos_suspensao, dict) and link_atos_suspensao.get('href'):
-            url_atos = link_atos_suspensao['href']
-            if debug_mode:
-                logger.info(f"🔍 Link para atos concessórios encontrado: {url_atos}")
-            
-            try:
-                atos_response = token_manager.request("GET", url_atos, headers=token_manager.obter_headers(), timeout=DEFAULT_HTTP_TIMEOUT_SEC)
-                if atos_response.status_code == 200:
-                    atos_concessorios = atos_response.json()
-                    if debug_mode and atos_concessorios and isinstance(atos_concessorios, list):
-                        logger.info(f"✅ {len(atos_concessorios)} atos concessórios obtidos")
-            except Exception as e:
+        if SISCOMEX_FETCH_ATOS_SUSPENSAO:
+            link_atos_suspensao = dados_completos.get('atosConcessoriosSuspensao', {})
+            if isinstance(link_atos_suspensao, dict) and link_atos_suspensao.get('href'):
+                url_atos = link_atos_suspensao['href']
                 if debug_mode:
-                    logger.info(f"⚠️  Erro ao consultar atos concessórios: {e}")
+                    logger.info(f"🔍 Link para atos concessórios encontrado: {url_atos}")
+                
+                try:
+                    atos_response = token_manager.request(
+                        "GET",
+                        url_atos,
+                        headers=token_manager.obter_headers(),
+                        timeout=DEFAULT_HTTP_TIMEOUT_SEC,
+                    )
+                    if atos_response.status_code == 200:
+                        atos_concessorios = atos_response.json()
+                        if debug_mode and atos_concessorios and isinstance(atos_concessorios, list):
+                            logger.info(f"✅ {len(atos_concessorios)} atos concessórios obtidos")
+                except Exception as e:
+                    if debug_mode:
+                        logger.info(f"⚠️  Erro ao consultar atos concessórios: {e}")
+            elif debug_mode:
+                logger.info("⚠️  Nenhum link para atos concessórios de suspensão encontrado")
         elif debug_mode:
-            logger.info(f"⚠️  Nenhum link para atos concessórios de suspensão encontrado")
+            logger.info("⚠️  Consulta de atos concessórios desativada por flag")
         
         # OTIMIZAÇÃO: Reduzir terceiras consultas desnecessárias
         # A segunda consulta já contém todos os dados necessários na maioria dos casos
@@ -877,13 +892,18 @@ def consultar_due_por_numero(
         
         # Consultar atos concessórios de suspensão se disponível
         atos_concessorios = None
-        if numero_due:
+        if SISCOMEX_FETCH_ATOS_SUSPENSAO and numero_due:
             link_atos_suspensao = f"{URL_DUE_BASE}/{numero_due}/drawback/suspensao/atos-concessorios"
             try:
                 if debug_mode:
                     logger.info(f"🔍 Link para atos concessórios encontrado: {link_atos_suspensao}")
                 
-                response_atos = token_manager.request("GET", link_atos_suspensao, headers=token_manager.obter_headers(), timeout=DEFAULT_HTTP_TIMEOUT_SEC)
+                response_atos = token_manager.request(
+                    "GET",
+                    link_atos_suspensao,
+                    headers=token_manager.obter_headers(),
+                    timeout=DEFAULT_HTTP_TIMEOUT_SEC,
+                )
                 if response_atos.status_code == 200:
                     atos_concessorios = response_atos.json()
                     if atos_concessorios and len(atos_concessorios) > 0:
@@ -891,7 +911,7 @@ def consultar_due_por_numero(
                             logger.info(f"✅ {len(atos_concessorios)} atos concessórios obtidos")
                     else:
                         if debug_mode:
-                            logger.info(f"⚠️  Nenhum ato concessório de suspensão encontrado")
+                            logger.info("⚠️  Nenhum ato concessório de suspensão encontrado")
                         atos_concessorios = None
                 else:
                     if debug_mode:
@@ -901,6 +921,8 @@ def consultar_due_por_numero(
                 if debug_mode:
                     logger.info(f"⚠️  Erro ao consultar atos concessórios: {str(e)[:50]}")
                 atos_concessorios = None
+        elif debug_mode and not SISCOMEX_FETCH_ATOS_SUSPENSAO:
+            logger.info("⚠️  Consulta de atos concessórios desativada por flag")
         
         # Usar dados da consulta direta como completos
         dados_completos = dados_due
@@ -1076,8 +1098,9 @@ def carregar_cache_due_siscomex() -> dict[str, str]:
     logger.warning("[DEPRECATED] Função carregar_cache_due_siscomex() está obsoleta")
     logger.info("[INFO] Use src.sync.new_dues.carregar_vinculos_existentes() para carregar vínculos do PostgreSQL")
 
-    if not db_manager.conn:
-        db_manager.conectar()
+    if not db_manager.conectar():
+        logger.error("❌ Falha ao conectar ao PostgreSQL")
+        return {}
 
     try:
         vinculos = db_manager.obter_vinculos()
@@ -1269,7 +1292,6 @@ def processar_chaves_nf(
                     
                     sucessos += 1
                     logger.info(f"    ✅ {chave[:20]}... → DU-E: {resultado['DU-E']}")
-                time.sleep(0.2)  # Delay reduzido
         else:
             logger.info("❌ Falha na renovação do token - chaves não reprocessadas")
     
@@ -1333,7 +1355,6 @@ def processar_sequencial_simples(
         except Exception as e:
             logger.info(f"[{i:3d}/{len(chaves_nf)}] ❌ {chave[:20]}... → Erro: {str(e)[:30]}")
         
-        time.sleep(0.5)  # Delay no sequencial
     
     return resultados, dados_normalizados_consolidados
 
@@ -1355,10 +1376,9 @@ def salvar_resultados_normalizados(
     logger.info("-" * 50)
 
     # Conectar ao banco se nao estiver conectado
-    if not db_manager.conn:
-        if not db_manager.conectar():
-            logger.error("[ERRO] Falha ao conectar ao PostgreSQL")
-            raise RuntimeError("Não foi possível conectar ao PostgreSQL para salvar dados")
+    if not db_manager.conectar():
+        logger.error("[ERRO] Falha ao conectar ao PostgreSQL")
+        raise RuntimeError("Não foi possível conectar ao PostgreSQL para salvar dados")
     
     # Contar registros por tabela
     total_registros = 0

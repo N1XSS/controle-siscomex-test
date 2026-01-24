@@ -1,7 +1,9 @@
 {
   "permissions": {
     "allow": [
-      "mcp__Desktop_Commander__list_directory"
+      "mcp__Desktop_Commander__list_directory",
+      "Bash(grep:*)",
+      "Bash(git add:*)"
     ]
   }
 }

@@ -3,11 +3,12 @@ Gerenciador de conexao e operacoes com PostgreSQL
 Sistema DUE - Siscomex
 """
 
+from __future__ import annotations
+
 import os
-import time
 from contextlib import contextmanager
 from datetime import datetime, timedelta
-from typing import Any, Dict, Generator, List, Optional
+from typing import Any, Generator
 
 import psycopg2
 from psycopg2 import pool, sql
@@ -62,8 +63,14 @@ class DatabaseManager:
     def get_connection(self) -> Generator[psycopg2.extensions.connection, None, None]:
         """Obtém uma conexao do pool com context manager."""
         if self.conn is not None:
-            yield self.conn
-            return
+            try:
+                if getattr(self.conn, "closed", 0):
+                    self.conn = None
+                else:
+                    yield self.conn
+                    return
+            except Exception:
+                self.conn = None
 
         self._initialize_pool()
         conn = self._pool.getconn() if self._pool else None
@@ -84,8 +91,14 @@ class DatabaseManager:
     def use_connection(self) -> Generator[psycopg2.extensions.connection, None, None]:
         """Disponibiliza uma conexao e garante self.conn durante o escopo."""
         if self.conn is not None:
-            yield self.conn
-            return
+            try:
+                if getattr(self.conn, "closed", 0):
+                    self.conn = None
+                else:
+                    yield self.conn
+                    return
+            except Exception:
+                self.conn = None
 
         self._initialize_pool()
         conn = self._pool.getconn() if self._pool else None
@@ -106,16 +119,13 @@ class DatabaseManager:
                 self._pool.putconn(conn)
     
     def conectar(self) -> bool:
-        """Estabelece conexao com o banco de dados.
+        """Inicializa o pool de conexoes com o banco de dados.
 
         Returns:
             True quando a conexao foi estabelecida.
         """
         try:
             self._initialize_pool()
-            if self.conn is None and self._pool:
-                self.conn = self._pool.getconn()
-            self.conn.autocommit = False
             logger.info(
                 "Connected to PostgreSQL: %s:%s/%s",
                 self.host,
@@ -169,7 +179,7 @@ class DatabaseManager:
             logger.error("Query failed: %s", e, exc_info=True)
             return False
     
-    def executar_query_retorno(self, query: str, params: tuple = None) -> List[Dict]:
+    def executar_query_retorno(self, query: str, params: tuple = None) -> list[dict]:
         """Executa uma query SQL e retorna resultados.
 
         Args:
@@ -229,7 +239,7 @@ class DatabaseManager:
     # OPERACOES NFE_SAP
     # =========================================================================
     
-    def inserir_nf_sap(self, chaves_nf: List[str]) -> int:
+    def inserir_nf_sap(self, chaves_nf: list[str]) -> int:
         """Insere chaves NF do SAP (upsert)"""
         if not chaves_nf:
             return 0
@@ -257,7 +267,7 @@ class DatabaseManager:
             logger.error("Failed to insert SAP NFs: %s", e, exc_info=True)
             return 0
     
-    def obter_nfs_sap(self) -> List[str]:
+    def obter_nfs_sap(self) -> list[str]:
         """Retorna todas as chaves NF ativas do SAP"""
         query = "SELECT chave_nf FROM nfe_sap WHERE ativo = TRUE"
         result = self.executar_query_retorno(query)
@@ -290,7 +300,7 @@ class DatabaseManager:
             logger.error("Failed to insert NF-DUE link: %s", e, exc_info=True)
             return False
     
-    def inserir_vinculos_batch(self, vinculos: List[Dict]) -> int:
+    def inserir_vinculos_batch(self, vinculos: list[dict]) -> int:
         """Insere multiplos vinculos NF->DUE"""
         if not vinculos:
             return 0
@@ -327,7 +337,7 @@ class DatabaseManager:
         result = self.executar_query_retorno(query)
         return {r['chave_nf']: r['numero_due'] for r in result}
     
-    def obter_nfs_sem_vinculo(self) -> List[str]:
+    def obter_nfs_sem_vinculo(self) -> list[str]:
         """Retorna NFs do SAP que nao tem vinculo com DUE"""
         query = """
             SELECT s.chave_nf 
@@ -388,7 +398,7 @@ class DatabaseManager:
             logger.error("Failed to insert DUE principal: %s", e, exc_info=True)
             return False
     
-    def obter_dues_desatualizadas(self, horas: int = 24, ignorar_canceladas: bool = True) -> List[str]:
+    def obter_dues_desatualizadas(self, horas: int = 24, ignorar_canceladas: bool = True) -> list[str]:
         """
         Retorna DUEs que nao foram atualizadas nas ultimas X horas.
         
@@ -421,7 +431,7 @@ class DatabaseManager:
         
         return [r['numero'] for r in result]
     
-    def obter_dues_por_situacao(self, situacoes: List[str]) -> List[Dict]:
+    def obter_dues_por_situacao(self, situacoes: list[str]) -> list[dict]:
         """Retorna DUEs filtradas por situacao.
 
         Args:
@@ -438,7 +448,7 @@ class DatabaseManager:
         """
         return self.executar_query_retorno(query, (situacoes,))
     
-    def obter_data_registro(self, numero_due: str) -> Optional[datetime]:
+    def obter_data_registro(self, numero_due: str) -> datetime | None:
         """Retorna a data_de_registro de uma DUE especifica"""
         query = "SELECT data_de_registro FROM due_principal WHERE numero = %s"
         result = self.executar_query_retorno(query, (numero_due,))
@@ -446,7 +456,7 @@ class DatabaseManager:
             return result[0].get('data_de_registro')
         return None
     
-    def obter_todas_dues(self) -> List[str]:
+    def obter_todas_dues(self) -> list[str]:
         """Retorna todos os numeros de DUE"""
         query = "SELECT numero FROM due_principal"
         result = self.executar_query_retorno(query)
@@ -717,7 +727,7 @@ class DatabaseManager:
         with self.conn.cursor() as cur:
             cur.execute(query, valores)
     
-    def _inserir_batch_eventos_historico(self, registros: List[Dict]) -> None:
+    def _inserir_batch_eventos_historico(self, registros: list[dict]) -> None:
         """Insere eventos do historico (deleta existentes e reinsere)"""
         if not registros:
             return
@@ -754,7 +764,7 @@ class DatabaseManager:
         with self.conn.cursor() as cur:
             execute_values(cur, query, dados)
     
-    def _inserir_batch_itens(self, registros: List[Dict]) -> None:
+    def _inserir_batch_itens(self, registros: list[dict]) -> None:
         """Insere itens da DUE"""
         if not registros:
             return
@@ -829,7 +839,7 @@ class DatabaseManager:
         with self.conn.cursor() as cur:
             execute_values(cur, query, dados)
     
-    def _inserir_batch_tratamentos_admin(self, registros: List[Dict]) -> None:
+    def _inserir_batch_tratamentos_admin(self, registros: list[dict]) -> None:
         """Insere tratamentos administrativos"""
         if not registros:
             return
@@ -870,7 +880,7 @@ class DatabaseManager:
         with self.conn.cursor() as cur:
             execute_values(cur, query, dados)
     
-    def _inserir_batch_nf_exportacao(self, registros: List[Dict]) -> None:
+    def _inserir_batch_nf_exportacao(self, registros: list[dict]) -> None:
         """Insere notas fiscais de exportacao"""
         if not registros:
             return
@@ -941,7 +951,7 @@ class DatabaseManager:
         with self.conn.cursor() as cur:
             execute_values(cur, query, dados)
     
-    def _inserir_batch_generico(self, tabela: str, registros: List[Dict]) -> None:
+    def _inserir_batch_generico(self, tabela: str, registros: list[dict]) -> None:
         """Insere registros de forma generica em tabelas com SERIAL id"""
         if not registros:
             return
@@ -1048,7 +1058,7 @@ class DatabaseManager:
     # OPERACOES TABELAS DE SUPORTE
     # =========================================================================
     
-    def inserir_suporte_batch(self, tabela: str, registros: List[Dict], pk_col: str = 'codigo') -> int:
+    def inserir_suporte_batch(self, tabela: str, registros: list[dict], pk_col: str = 'codigo') -> int:
         """Insere registros em tabela de suporte com upsert.
 
         Args:
@@ -1094,7 +1104,7 @@ class DatabaseManager:
             logger.error("Failed to insert into %s: %s", tabela, e, exc_info=True)
             return 0
     
-    def _inserir_batch_atos_concessorios(self, tabela: str, registros: List[Dict]) -> None:
+    def _inserir_batch_atos_concessorios(self, tabela: str, registros: list[dict]) -> None:
         """Insere registros de atos concessórios com mapeamento específico"""
         if not registros:
             return
@@ -1135,7 +1145,7 @@ class DatabaseManager:
                     if 'valor' in db_col or 'quantidade' in db_col:
                         try:
                             valor = float(valor) if valor else 0
-                        except:
+                        except (ValueError, TypeError):
                             valor = 0
                     dados_linha[db_col] = valor
             dados_mapeados.append(dados_linha)
@@ -1167,116 +1177,48 @@ class DatabaseManager:
     # ATUALIZACAO EM BATCH
     # =========================================================================
     
-    def atualizar_data_ultima_atualizacao_batch(self, numeros_due: List[str]) -> int:
+    def atualizar_data_ultima_atualizacao_batch(self, numeros_due: list[str]) -> int:
         """
-        Atualiza data_ultima_atualizacao para múltiplas DUEs de uma vez.
-        Processa em lotes menores para evitar problemas de conexão.
+        Atualiza data_ultima_atualizacao para multiplas DUEs de uma vez.
+        Processa em lotes menores para evitar problemas de conexao.
 
         Args:
-            numeros_due: Lista de números de DUE para atualizar
+            numeros_due: Lista de numeros de DUE para atualizar
 
         Returns:
-            Número de DUEs atualizadas
+            Numero de DUEs atualizadas
         """
         if not numeros_due:
             return 0
 
-        started_with_conn = self.conn is not None
-        try:
-            # Verificar/reconectar se necessário
+        total_atualizado = 0
+        tamanho_lote = 50
+        agora = datetime.utcnow().isoformat()
+
+        query = """
+            UPDATE due_principal
+            SET data_ultima_atualizacao = %s
+            WHERE numero = ANY(%s)
+        """
+
+        for i in range(0, len(numeros_due), tamanho_lote):
+            lote = numeros_due[i:i + tamanho_lote]
             try:
-                if not self.conn:
-                    if not self.conectar():
-                        logger.error("Could not connect to database")
-                        return 0
-                # Testar conexão fazendo uma query simples
-                with self.conn.cursor() as cur:
-                    cur.execute("SELECT 1")
-            except (psycopg2.InterfaceError, psycopg2.OperationalError):
-                # Conexão fechada ou inválida, reconectar
-                if not self.conectar():
-                    logger.error("Could not reconnect to database")
-                    return 0
-
-            total_atualizado = 0
-            tamanho_lote = 50  # Processar em lotes de 50 para evitar problemas de conexão
-
-            try:
-                agora = datetime.utcnow().isoformat()
-
-                # Processar em lotes
-                for i in range(0, len(numeros_due), tamanho_lote):
-                    lote = numeros_due[i:i + tamanho_lote]
-
-                    try:
-                        # Verificar conexão antes de cada lote
-                        try:
-                            with self.conn.cursor() as test_cur:
-                                test_cur.execute("SELECT 1")
-                        except (psycopg2.InterfaceError, psycopg2.OperationalError):
-                            # Conexão fechada, reconectar
-                            if not self.conectar():
-                                logger.error("Connection closed, failed to reconnect")
-                                break
-
-                        query = """
-                            UPDATE due_principal
-                            SET data_ultima_atualizacao = %s
-                            WHERE numero = ANY(%s)
-                        """
-
-                        with self.conn.cursor() as cur:
-                            cur.execute(query, (agora, lote))
-                            count = cur.rowcount
-                            total_atualizado += count
-
-                        self.conn.commit()
-
-                        # Pequeno delay entre lotes para não sobrecarregar o servidor
-                        time.sleep(0.1)
-
-                    except Exception as e:
-                        # Tentar rollback apenas se conexão ainda estiver aberta
-                        try:
-                            if self.conn:
-                                self.conn.rollback()
-                        except:
-                            pass
-
-                        logger.error(
-                            "Failed to update batch %s: %s",
-                            i // tamanho_lote + 1,
-                            e,
-                            exc_info=True,
-                        )
-                        # Tentar reconectar para próximo lote
-                        try:
-                            with self.conn.cursor() as test_cur:
-                                test_cur.execute("SELECT 1")
-                        except (psycopg2.InterfaceError, psycopg2.OperationalError):
-                            if not self.conectar():
-                                logger.error("Failed to reconnect, stopping batch update")
-                                break
-
-                return total_atualizado
-
+                with self.get_connection() as conn:
+                    with conn.cursor() as cur:
+                        cur.execute(query, (agora, lote))
+                        total_atualizado += cur.rowcount
+                    conn.commit()
             except Exception as e:
-                # Tentar rollback apenas se conexão ainda estiver aberta
-                try:
-                    if self.conn:
-                        self.conn.rollback()
-                except:
-                    pass
                 logger.error(
-                    "Failed to update data_ultima_atualizacao in batch: %s",
+                    "Failed to update batch %s: %s",
+                    i // tamanho_lote + 1,
                     e,
                     exc_info=True,
                 )
-                return total_atualizado
-        finally:
-            if not started_with_conn:
-                self.desconectar()
-    
+
+        return total_atualizado
+
     # =========================================================================
     # ESTATISTICAS
     # =========================================================================
@@ -1293,9 +1235,10 @@ class DatabaseManager:
             try:
                 result = self.executar_query_retorno(f"SELECT COUNT(*) as cnt FROM {tabela}")
                 stats[tabela] = result[0]['cnt'] if result else 0
-            except:
+            except Exception as e:
+                logger.warning(f"Erro ao contar registros da tabela {tabela}: {e}")
                 stats[tabela] = -1
-        
+
         return stats
 
 

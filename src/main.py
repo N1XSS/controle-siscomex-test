@@ -23,6 +23,8 @@ Uso:
     python -m src.main --status                 # Exibir status do sistema
 """
 
+from __future__ import annotations
+
 import argparse
 import json
 import os
@@ -40,9 +42,57 @@ from src.core.constants import (
     SCRIPT_SYNC_ATUALIZAR,
     SCRIPT_SYNC_NOVAS,
     SCRIPTS_DIR,
+    SISCOMEX_FETCH_ATOS_ISENCAO,
+    SISCOMEX_FETCH_ATOS_SUSPENSAO,
+    SISCOMEX_FETCH_EXIGENCIAS_FISCAIS,
 )
 from src.core.logger import logger
+from src.core.config_validator import validar_configuracao
 from src.notifications import notify_sync_start, notify_sync_complete, notify_sync_error
+from dotenv import load_dotenv
+
+
+def buscar_dados_complementares(
+    numero_due: str,
+    tipo: str,
+    url: str,
+    token_manager
+) -> dict | list | None:
+    """Busca dados complementares da DUE (atos concessórios ou exigências fiscais).
+
+    Args:
+        numero_due: Número da DUE
+        tipo: Tipo de dados ('atos_suspensao', 'atos_isencao', 'exigencias_fiscais')
+        url: URL completa do endpoint
+        token_manager: Instância do gerenciador de tokens
+
+    Returns:
+        Dados JSON retornados pela API ou None em caso de erro
+    """
+    try:
+        response = token_manager.request(
+            "GET",
+            url,
+            headers=token_manager.obter_headers(),
+            timeout=DEFAULT_HTTP_TIMEOUT_SEC,
+        )
+        if response.status_code == 200:
+            dados = response.json()
+            if dados:
+                logger.info(f"  - {len(dados)} {tipo}")
+            return dados
+        else:
+            logger.warning(
+                f"[AVISO] Falha ao buscar {tipo}: "
+                f"HTTP {response.status_code}"
+            )
+            return None
+    except json.JSONDecodeError as e:
+        logger.warning(f"[AVISO] Erro ao decodificar JSON de {tipo}: {e}")
+        return None
+    except Exception as e:
+        logger.warning(f"[AVISO] Erro ao buscar {tipo}: {e}")
+        return None
 
 
 def exibir_cabecalho() -> None:
@@ -63,11 +113,11 @@ def exibir_status() -> None:
     try:
         from src.database.manager import db_manager
         
-        if not db_manager.conn:
-            db_manager.conectar()
-        
-        if db_manager.conn:
-            stats = db_manager.obter_estatisticas()
+        if not db_manager.conectar():
+            logger.error("  [ERRO] Nao foi possivel conectar ao PostgreSQL")
+            return
+
+        stats = db_manager.obter_estatisticas()
             
             logger.info(f"  NFs SAP: {stats.get('nfe_sap', 0)} chaves")
             logger.info(f"  Vinculos NF->DUE: {stats.get('nf_due_vinculo', 0)} registros")
@@ -86,12 +136,9 @@ def exibir_status() -> None:
                     f"{DEFAULT_DB_STATUS_INTERVAL_HOURS}h): "
                     f"{len(desatualizadas) if desatualizadas else 0}"
                 )
-            except:
-                pass
+            except Exception as e:
+                logger.warning(f"  [AVISO] Erro ao consultar DUEs desatualizadas: {e}")
             
-        else:
-            logger.error("  [ERRO] Nao foi possivel conectar ao PostgreSQL")
-        
     except Exception as e:
         logger.error(f"  [ERRO] Erro ao obter status: {e}")
     
@@ -242,48 +289,24 @@ def atualizar_due_especifica(numero_due: str) -> None:
         atos_suspensao = None
         atos_isencao = None
         exigencias_fiscais = None
-        
-        try:
+
+        if SISCOMEX_FETCH_ATOS_SUSPENSAO:
             url_atos_susp = f"https://portalunico.siscomex.gov.br/due/api/ext/due/{numero_due}/drawback/suspensao/atos-concessorios"
-            response = token_manager.request("GET", 
-                url_atos_susp,
-                headers=token_manager.obter_headers(),
-                timeout=DEFAULT_HTTP_TIMEOUT_SEC,
+            atos_suspensao = buscar_dados_complementares(
+                numero_due, "atos de suspensao", url_atos_susp, token_manager
             )
-            if response.status_code == 200:
-                atos_suspensao = response.json()
-                if atos_suspensao:
-                    logger.info(f"  - {len(atos_suspensao)} atos de suspensao")
-        except:
-            pass
-        
-        try:
+
+        if SISCOMEX_FETCH_ATOS_ISENCAO:
             url_atos_isen = f"https://portalunico.siscomex.gov.br/due/api/ext/due/{numero_due}/drawback/isencao/atos-concessorios"
-            response = token_manager.request("GET", 
-                url_atos_isen,
-                headers=token_manager.obter_headers(),
-                timeout=DEFAULT_HTTP_TIMEOUT_SEC,
+            atos_isencao = buscar_dados_complementares(
+                numero_due, "atos de isencao", url_atos_isen, token_manager
             )
-            if response.status_code == 200:
-                atos_isencao = response.json()
-                if atos_isencao:
-                    logger.info(f"  - {len(atos_isencao)} atos de isencao")
-        except:
-            pass
-        
-        try:
+
+        if SISCOMEX_FETCH_EXIGENCIAS_FISCAIS:
             url_exig = f"https://portalunico.siscomex.gov.br/due/api/ext/due/{numero_due}/exigencias-fiscais"
-            response = token_manager.request("GET", 
-                url_exig,
-                headers=token_manager.obter_headers(),
-                timeout=DEFAULT_HTTP_TIMEOUT_SEC,
+            exigencias_fiscais = buscar_dados_complementares(
+                numero_due, "exigencias fiscais", url_exig, token_manager
             )
-            if response.status_code == 200:
-                exigencias_fiscais = response.json()
-                if exigencias_fiscais:
-                    logger.info(f"  - {len(exigencias_fiscais)} exigencias fiscais")
-        except:
-            pass
         
         # Processar dados
         logger.info(f"[INFO] Processando dados...")
@@ -348,9 +371,10 @@ def atualizar_drawback(dues_str: str | None = None, todas: bool = False) -> None
         if todas:
             # Buscar todas DUEs que tem atos concessorios
             try:
-                cur = db_manager.conn.cursor()
-                cur.execute("SELECT DISTINCT numero_due FROM due_atos_concessorios_suspensao")
-                dues = [row[0] for row in cur.fetchall()]
+                with db_manager.get_connection() as conn:
+                    with conn.cursor() as cur:
+                        cur.execute("SELECT DISTINCT numero_due FROM due_atos_concessorios_suspensao")
+                        dues = [row[0] for row in cur.fetchall()]
                 if not dues:
                     logger.info("[INFO] Nenhuma DUE com atos concessorios encontrada")
                     db_manager.desconectar()
@@ -432,25 +456,27 @@ def atualizar_drawback(dues_str: str | None = None, todas: bool = False) -> None
                             })
                         
                         # Deletar registros antigos e inserir novos
-                        cur = db_manager.conn.cursor()
-                        cur.execute("DELETE FROM due_atos_concessorios_suspensao WHERE numero_due = %s", (numero_due,))
-                        
-                        for reg in registros:
-                            cur.execute("""
-                                INSERT INTO due_atos_concessorios_suspensao 
-                                (numero_due, ato_numero, tipo_codigo, tipo_descricao, item_numero, 
-                                 item_ncm, beneficiario_cnpj, quantidade_exportada, 
-                                 valor_com_cobertura_cambial, valor_sem_cobertura_cambial, item_de_due_numero)
-                                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-                            """, (
-                                reg['numero_due'], reg['ato_numero'], reg['tipo_codigo'],
-                                reg['tipo_descricao'], reg['item_numero'], reg['item_ncm'],
-                                reg['beneficiario_cnpj'], reg['quantidadeExportada'],
-                                reg['valorComCoberturaCambial'], reg['valorSemCoberturaCambial'],
-                                reg['itemDeDUE_numero']
-                            ))
-                        
-                        db_manager.conn.commit()
+                        with db_manager.get_connection() as conn:
+                            with conn.cursor() as cur:
+                                cur.execute(
+                                    "DELETE FROM due_atos_concessorios_suspensao WHERE numero_due = %s",
+                                    (numero_due,),
+                                )
+                                for reg in registros:
+                                    cur.execute("""
+                                        INSERT INTO due_atos_concessorios_suspensao 
+                                        (numero_due, ato_numero, tipo_codigo, tipo_descricao, item_numero, 
+                                         item_ncm, beneficiario_cnpj, quantidade_exportada, 
+                                         valor_com_cobertura_cambial, valor_sem_cobertura_cambial, item_de_due_numero)
+                                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                                    """, (
+                                        reg['numero_due'], reg['ato_numero'], reg['tipo_codigo'],
+                                        reg['tipo_descricao'], reg['item_numero'], reg['item_ncm'],
+                                        reg['beneficiario_cnpj'], reg['quantidadeExportada'],
+                                        reg['valorComCoberturaCambial'], reg['valorSemCoberturaCambial'],
+                                        reg['itemDeDUE_numero']
+                                    ))
+                            conn.commit()
                         atualizadas += 1
                         
                         if len(dues) <= 10:
@@ -469,8 +495,6 @@ def atualizar_drawback(dues_str: str | None = None, todas: bool = False) -> None
                 if len(dues) <= 10:
                     logger.error(f"  [ERRO] {str(e)[:50]}")
             
-            import time
-            time.sleep(0.2)
         
         db_manager.desconectar()
         
@@ -739,6 +763,14 @@ def menu_interativo() -> None:
 
 def main() -> None:
     """Funcao principal do CLI."""
+    # Carregar variáveis de ambiente
+    load_dotenv(ENV_CONFIG_FILE)
+
+    # Validar configurações obrigatórias
+    if not validar_configuracao():
+        logger.error("\n❌ Configuração inválida. Corrija os erros acima e tente novamente.")
+        sys.exit(1)
+
     parser = argparse.ArgumentParser(
         description='Gerenciador de Sincronizacao DUE',
         formatter_class=argparse.RawDescriptionHelpFormatter,

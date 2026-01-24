@@ -16,6 +16,8 @@ Uso:
     python -m src.sync.new_dues --limit 200  # Limita consultas
 """
 
+from __future__ import annotations
+
 import argparse
 import os
 import time
@@ -33,7 +35,9 @@ from src.core.constants import (
     ENABLE_PARALLEL_DOWNLOADS,
     ENV_CONFIG_FILE,
     MAX_CONSULTAS_NF_POR_EXECUCAO,
-    SISCOMEX_RATE_LIMIT_HOUR,
+    SISCOMEX_FETCH_ATOS_ISENCAO,
+    SISCOMEX_FETCH_ATOS_SUSPENSAO,
+    SISCOMEX_FETCH_EXIGENCIAS_FISCAIS,
 )
 from src.database.manager import db_manager
 from src.core.logger import logger
@@ -65,6 +69,42 @@ URL_DUE_BASE = "https://portalunico.siscomex.gov.br/due/api/ext/due"
 MAX_CONSULTAS_NF = MAX_CONSULTAS_NF_POR_EXECUCAO
 
 
+def buscar_dados_complementares(
+    numero_due: str,
+    tipo: str,
+    url: str,
+) -> dict | list | None:
+    """Busca dados complementares da DUE (atos concessórios ou exigências fiscais).
+
+    Args:
+        numero_due: Número da DUE
+        tipo: Tipo de dados ('atos_suspensao', 'atos_isencao', 'exigencias_fiscais')
+        url: URL completa do endpoint
+
+    Returns:
+        Dados JSON retornados pela API ou None em caso de erro
+    """
+    try:
+        response = token_manager.request(
+            "GET",
+            url,
+            headers=token_manager.obter_headers(),
+            timeout=DEFAULT_HTTP_TIMEOUT_SEC,
+        )
+        if response.status_code == 200:
+            dados = response.json()
+            return dados
+        else:
+            logger.warning(
+                f"[AVISO] Falha ao buscar {tipo} para DUE {numero_due}: "
+                f"HTTP {response.status_code}"
+            )
+            return None
+    except Exception as e:
+        logger.warning(f"[AVISO] Erro ao buscar {tipo}: {e}")
+        return None
+
+
 @timed
 def carregar_nfs_sap() -> list[str]:
     """Carrega as chaves NF do PostgreSQL.
@@ -75,9 +115,8 @@ def carregar_nfs_sap() -> list[str]:
     Raises:
         RuntimeError: Se não conseguir conectar ao PostgreSQL.
     """
-    if not db_manager.conn:
-        if not db_manager.conectar():
-            raise RuntimeError("[ERRO] Nao foi possivel conectar ao PostgreSQL")
+    if not db_manager.conectar():
+        raise RuntimeError("[ERRO] Nao foi possivel conectar ao PostgreSQL")
 
     try:
         chaves = db_manager.obter_nfs_sap()
@@ -100,17 +139,17 @@ def carregar_vinculos_existentes() -> dict[str, str]:
     Returns:
         Dicionario {chave_nf: numero_due}.
     """
-    if not db_manager.conn:
-        db_manager.conectar()
-    
-    if db_manager.conn:
-        try:
-            vinculos = db_manager.obter_vinculos()
-            if vinculos:
-                logger.info(f"[INFO] {len(vinculos)} vinculos existentes carregados")
-                return vinculos
-        except Exception as e:
-            logger.warning(f"[AVISO] Erro ao carregar vinculos: {e}")
+    if not db_manager.conectar():
+        logger.warning("[AVISO] Nao foi possivel conectar ao PostgreSQL")
+        return {}
+
+    try:
+        vinculos = db_manager.obter_vinculos()
+        if vinculos:
+            logger.info(f"[INFO] {len(vinculos)} vinculos existentes carregados")
+            return vinculos
+    except Exception as e:
+        logger.warning(f"[AVISO] Erro ao carregar vinculos: {e}")
     
     return {}
 
@@ -143,16 +182,12 @@ def salvar_novos_vinculos(novos_vinculos: dict[str, str]) -> None:
     max_tentativas = 3
     for tentativa in range(max_tentativas):
         try:
-            # Verificar e reconectar se necessário
-            if not db_manager.conn or db_manager.conn.closed:
-                logger.info(f"[INFO] Reconectando ao banco (tentativa {tentativa + 1}/{max_tentativas})...")
-                if not db_manager.conectar():
-                    logger.warning(f"[AVISO] Falha ao reconectar (tentativa {tentativa + 1})")
-                    if tentativa < max_tentativas - 1:
-                        time.sleep(2)
-                        continue
-                    else:
-                        raise RuntimeError("Nao foi possivel reconectar ao banco apos todas as tentativas")
+            if not db_manager.conectar():
+                logger.warning(f"[AVISO] Falha ao conectar (tentativa {tentativa + 1})")
+                if tentativa < max_tentativas - 1:
+                    time.sleep(2)
+                    continue
+                raise RuntimeError("Nao foi possivel conectar ao banco apos todas as tentativas")
 
             # Tentar inserir
             count = db_manager.inserir_vinculos_batch(registros)
@@ -177,46 +212,28 @@ def consultar_dados_adicionais(numero_due: str) -> tuple[Any, Any, Any]:
     atos_suspensao = None
     atos_isencao = None
     exigencias_fiscais = None
-    
+
     # Atos de suspensao
-    try:
+    if SISCOMEX_FETCH_ATOS_SUSPENSAO:
         url = f"{URL_DUE_BASE}/{numero_due}/drawback/suspensao/atos-concessorios"
-        response = token_manager.request("GET", 
-            url,
-            headers=token_manager.obter_headers(),
-            timeout=DEFAULT_HTTP_TIMEOUT_SEC,
+        atos_suspensao = buscar_dados_complementares(
+            numero_due, "atos de suspensao", url
         )
-        if response.status_code == 200:
-            atos_suspensao = response.json()
-    except:
-        pass
-    
+
     # Atos de isencao
-    try:
+    if SISCOMEX_FETCH_ATOS_ISENCAO:
         url = f"{URL_DUE_BASE}/{numero_due}/drawback/isencao/atos-concessorios"
-        response = token_manager.request("GET", 
-            url,
-            headers=token_manager.obter_headers(),
-            timeout=DEFAULT_HTTP_TIMEOUT_SEC,
+        atos_isencao = buscar_dados_complementares(
+            numero_due, "atos de isencao", url
         )
-        if response.status_code == 200:
-            atos_isencao = response.json()
-    except:
-        pass
-    
+
     # Exigencias fiscais
-    try:
+    if SISCOMEX_FETCH_EXIGENCIAS_FISCAIS:
         url = f"{URL_DUE_BASE}/{numero_due}/exigencias-fiscais"
-        response = token_manager.request("GET", 
-            url,
-            headers=token_manager.obter_headers(),
-            timeout=DEFAULT_HTTP_TIMEOUT_SEC,
+        exigencias_fiscais = buscar_dados_complementares(
+            numero_due, "exigencias fiscais", url
         )
-        if response.status_code == 200:
-            exigencias_fiscais = response.json()
-    except:
-        pass
-    
+
     return atos_suspensao, atos_isencao, exigencias_fiscais
 
 
@@ -444,7 +461,6 @@ def processar_novas_nfs() -> None:
                     else:
                         dues_erro += 1
 
-                    time.sleep(0.3)
             
             logger.info(f"\n[OK] {dues_ok} DUEs baixadas com sucesso")
             if dues_erro > 0:
