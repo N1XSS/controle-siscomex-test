@@ -1362,14 +1362,17 @@ def salvar_resultados_normalizados(
     dados_normalizados: dict[str, list[dict[str, Any]]],
     pasta: str = 'dados/due-normalizados',
     modo_incremental: bool = True,
-) -> None:
+) -> tuple[int, int]:
     """
     Salva todos os dados normalizados no PostgreSQL.
-    
+
     Args:
         dados_normalizados: Dicionario com dados por tabela
         pasta: Pasta de destino (ignorado, mantido para compatibilidade)
         modo_incremental: Mantido para compatibilidade (sempre faz upsert no PostgreSQL)
+
+    Returns:
+        Tupla (dues_salvas, dues_erro)
     """
     
     logger.info(f"\n💾 Salvando dados normalizados no PostgreSQL...")
@@ -1399,6 +1402,8 @@ def salvar_resultados_normalizados(
         logger.info(f"📊 {tabelas_salvas} tabelas, {total_registros} registros, {salvas} DUEs salvas no PostgreSQL")
     else:
         logger.error(f"[ERRO] Falha ao salvar no PostgreSQL ({erros} erros)")
+
+    return salvas, erros
 
 
 def _salvar_resultados_normalizados_csv(

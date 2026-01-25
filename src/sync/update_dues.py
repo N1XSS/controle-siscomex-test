@@ -130,7 +130,8 @@ def carregar_dues_para_verificar(
     resultado = {
         'pendentes': [],
         'averbadas_recentes': [],
-        'averbadas_antigas': []
+        'averbadas_antigas': [],
+        'orfas': []  # DUEs com vínculo mas sem dados em due_principal
     }
     
     try:
@@ -179,36 +180,63 @@ def carregar_dues_para_verificar(
                     'numero': numero,
                     'data_registro_bd': data_registro
                 })
-        
+
+        # Buscar DUEs órfãs (têm vínculo em nf_due_vinculo mas não existem em due_principal)
+        with db_manager.get_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute("""
+                    SELECT DISTINCT v.numero_due
+                    FROM nf_due_vinculo v
+                    LEFT JOIN due_principal p ON v.numero_due = p.numero
+                    WHERE p.numero IS NULL
+                """)
+                orfas_rows = cur.fetchall()
+
+        for (numero_due,) in orfas_rows:
+            resultado['orfas'].append({
+                'numero': numero_due,
+                'data_registro_bd': None
+            })
+
         # Aplicar limite
         limite_final = limite if limite else MAX_ATUALIZACOES_POR_EXECUCAO
-        
+
+        total_orfas = len(resultado['orfas'])
         total_pendentes = len(resultado['pendentes']) + len(resultado['averbadas_recentes'])
         total_verificar = len(resultado['averbadas_antigas'])
-        
+
         logger.info(f"[INFO] DUEs encontradas:")
+        logger.info(f"  - Orfas (vinculo sem dados): {total_orfas}")
         logger.info(f"  - Pendentes (atualizar direto): {len(resultado['pendentes'])}")
         logger.info(f"  - Averbadas recentes (atualizar direto): {len(resultado['averbadas_recentes'])}")
         logger.info(f"  - Averbadas antigas (verificar antes): {len(resultado['averbadas_antigas'])}")
-        
-        # Limitar as listas
-        if total_pendentes + total_verificar > limite_final:
-            # Priorizar pendentes
-            if len(resultado['pendentes']) > limite_final:
-                resultado['pendentes'] = resultado['pendentes'][:limite_final]
+
+        # Limitar as listas (prioridade: orfas > pendentes > averbadas_recentes > averbadas_antigas)
+        total_geral = total_orfas + total_pendentes + total_verificar
+        if total_geral > limite_final:
+            # Priorizar órfãs primeiro (precisam ser baixadas)
+            if total_orfas > limite_final:
+                resultado['orfas'] = resultado['orfas'][:limite_final]
+                resultado['pendentes'] = []
                 resultado['averbadas_recentes'] = []
                 resultado['averbadas_antigas'] = []
             else:
-                restante = limite_final - len(resultado['pendentes'])
-                if len(resultado['averbadas_recentes']) > restante:
-                    resultado['averbadas_recentes'] = resultado['averbadas_recentes'][:restante]
+                restante = limite_final - total_orfas
+                if len(resultado['pendentes']) > restante:
+                    resultado['pendentes'] = resultado['pendentes'][:restante]
+                    resultado['averbadas_recentes'] = []
                     resultado['averbadas_antigas'] = []
                 else:
-                    restante2 = restante - len(resultado['averbadas_recentes'])
-                    resultado['averbadas_antigas'] = resultado['averbadas_antigas'][:restante2]
-            
+                    restante2 = restante - len(resultado['pendentes'])
+                    if len(resultado['averbadas_recentes']) > restante2:
+                        resultado['averbadas_recentes'] = resultado['averbadas_recentes'][:restante2]
+                        resultado['averbadas_antigas'] = []
+                    else:
+                        restante3 = restante2 - len(resultado['averbadas_recentes'])
+                        resultado['averbadas_antigas'] = resultado['averbadas_antigas'][:restante3]
+
             logger.info(f"[INFO] Limitado a {limite_final} DUEs por execucao")
-        
+
         return resultado
         
     except Exception as e:
@@ -567,11 +595,12 @@ def atualizar_dues() -> None:
             return
         
         total_dues = (
-            len(dues_info['pendentes'])
+            len(dues_info.get('orfas', []))
+            + len(dues_info['pendentes'])
             + len(dues_info['averbadas_recentes'])
             + len(dues_info['averbadas_antigas'])
         )
-        
+
         if total_dues == 0:
             logger.info("[OK] Nenhuma DUE precisa ser atualizada!")
             return
@@ -625,6 +654,8 @@ def atualizar_dues() -> None:
         }
         
         stats = {
+            'orfas_ok': 0,
+            'orfas_erro': 0,
             'pendentes_ok': 0,
             'pendentes_erro': 0,
             'averbadas_recentes_ok': 0,
@@ -634,13 +665,14 @@ def atualizar_dues() -> None:
             'averbadas_antigas_erro': 0
         }
         
-        # 5. Processar DUEs PENDENTES (atualizar direto)
-        dues_pendentes = dues_info['pendentes'] + dues_info['averbadas_recentes']
+        # 5. Processar DUEs ÓRFÃS + PENDENTES (atualizar/baixar direto)
+        dues_orfas = dues_info.get('orfas', [])
+        dues_pendentes = dues_orfas + dues_info['pendentes'] + dues_info['averbadas_recentes']
         if dues_pendentes:
             # Usar processamento paralelo se habilitado
             if ENABLE_PARALLEL_DOWNLOADS and len(dues_pendentes) > 1:
                 max_workers = max(1, args.workers_download)
-                logger.info(f"\n[FASE 1] Atualizando {len(dues_pendentes)} DUEs pendentes/recentes (PARALELO: {max_workers} workers)...")
+                logger.info(f"\n[FASE 1] Atualizando {len(dues_pendentes)} DUEs orfas/pendentes/recentes (PARALELO: {max_workers} workers)...")
 
                 with ThreadPoolExecutor(max_workers=max_workers) as executor:
                     # Submeter todas as DUEs para download paralelo
@@ -665,25 +697,31 @@ def atualizar_dues() -> None:
                                     if tabela in dados_consolidados:
                                         dados_consolidados[tabela].extend(dados)
 
-                                if due_info in dues_info['pendentes']:
+                                if due_info in dues_orfas:
+                                    stats['orfas_ok'] += 1
+                                elif due_info in dues_info['pendentes']:
                                     stats['pendentes_ok'] += 1
                                 else:
                                     stats['averbadas_recentes_ok'] += 1
                             else:
-                                if due_info in dues_info['pendentes']:
+                                if due_info in dues_orfas:
+                                    stats['orfas_erro'] += 1
+                                elif due_info in dues_info['pendentes']:
                                     stats['pendentes_erro'] += 1
                                 else:
                                     stats['averbadas_recentes_erro'] += 1
 
                         except Exception as e:
                             logger.warning(f"Erro ao processar DUE {numero_due}: {e}")
-                            if due_info in dues_info['pendentes']:
+                            if due_info in dues_orfas:
+                                stats['orfas_erro'] += 1
+                            elif due_info in dues_info['pendentes']:
                                 stats['pendentes_erro'] += 1
                             else:
                                 stats['averbadas_recentes_erro'] += 1
             else:
                 # Fallback para processamento sequencial (se desabilitado ou uma única DUE)
-                logger.info(f"\n[FASE 1] Atualizando {len(dues_pendentes)} DUEs pendentes/recentes (SEQUENCIAL)...")
+                logger.info(f"\n[FASE 1] Atualizando {len(dues_pendentes)} DUEs orfas/pendentes/recentes (SEQUENCIAL)...")
 
                 for i, due_info in enumerate(dues_pendentes, 1):
                     numero_due = due_info['numero']
@@ -698,12 +736,16 @@ def atualizar_dues() -> None:
                             if tabela in dados_consolidados:
                                 dados_consolidados[tabela].extend(dados)
 
-                        if due_info in dues_info['pendentes']:
+                        if due_info in dues_orfas:
+                            stats['orfas_ok'] += 1
+                        elif due_info in dues_info['pendentes']:
                             stats['pendentes_ok'] += 1
                         else:
                             stats['averbadas_recentes_ok'] += 1
                     else:
-                        if due_info in dues_info['pendentes']:
+                        if due_info in dues_orfas:
+                            stats['orfas_erro'] += 1
+                        elif due_info in dues_info['pendentes']:
                             stats['pendentes_erro'] += 1
                         else:
                             stats['averbadas_recentes_erro'] += 1
@@ -739,7 +781,8 @@ def atualizar_dues() -> None:
         
         # 7. Salvar dados atualizados
         total_atualizadas = (
-            stats['pendentes_ok']
+            stats['orfas_ok']
+            + stats['pendentes_ok']
             + stats['averbadas_recentes_ok']
             + stats['averbadas_antigas_mudou']
         )
@@ -754,22 +797,26 @@ def atualizar_dues() -> None:
         logger.info("=" * 60)
         
         logger.info(f"\n[RESUMO]")
+        logger.info(f"  DUEs Orfas (vinculo sem dados):")
+        logger.info(f"    - Baixadas: {stats['orfas_ok']}")
+        logger.info(f"    - Erros: {stats['orfas_erro']}")
+
         logger.info(f"  DUEs Pendentes:")
         logger.info(f"    - Atualizadas: {stats['pendentes_ok']}")
         logger.info(f"    - Erros: {stats['pendentes_erro']}")
-        
+
         logger.info(f"  DUEs Averbadas Recentes (<{DIAS_AVERBACAO_RECENTE} dias):")
         logger.info(f"    - Atualizadas: {stats['averbadas_recentes_ok']}")
         logger.info(f"    - Erros: {stats['averbadas_recentes_erro']}")
-        
+
         logger.info(f"  DUEs Averbadas Antigas:")
         logger.info(f"    - Com mudancas (atualizadas): {stats['averbadas_antigas_mudou']}")
         logger.info(f"    - Sem mudancas (ignoradas): {stats['averbadas_antigas_sem_mudanca']}")
         logger.info(f"    - Erros: {stats['averbadas_antigas_erro']}")
-        
-        total_ok = stats['pendentes_ok'] + stats['averbadas_recentes_ok'] + stats['averbadas_antigas_mudou']
+
+        total_ok = stats['orfas_ok'] + stats['pendentes_ok'] + stats['averbadas_recentes_ok'] + stats['averbadas_antigas_mudou']
         total_ignoradas = stats['averbadas_antigas_sem_mudanca']
-        total_erros = stats['pendentes_erro'] + stats['averbadas_recentes_erro'] + stats['averbadas_antigas_erro']
+        total_erros = stats['orfas_erro'] + stats['pendentes_erro'] + stats['averbadas_recentes_erro'] + stats['averbadas_antigas_erro']
         
         logger.info(f"\n  TOTAL:")
         logger.info(f"    - Atualizadas: {total_ok}")
@@ -787,6 +834,7 @@ def atualizar_dues() -> None:
                 'dues_atualizadas': total_ok,
                 'dues_ignoradas': total_ignoradas,
                 'dues_erro': total_erros,
+                'orfas_ok': stats['orfas_ok'],
                 'pendentes_ok': stats['pendentes_ok'],
                 'averbadas_recentes_ok': stats['averbadas_recentes_ok'],
                 'averbadas_antigas_mudou': stats['averbadas_antigas_mudou'],
