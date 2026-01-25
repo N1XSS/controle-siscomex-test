@@ -24,6 +24,7 @@ from src.core.constants import (
 )
 from src.database.schema import ALL_TABLES, DROP_ALL_TABLES
 from src.core.logger import logger
+from src.notifications.whatsapp import notify_database_error
 
 # Carregar variáveis de ambiente (arquivo .env se existir, mas não sobrescreve variáveis já definidas)
 # No Docker, as variáveis vêm do ambiente (Dokploy), não de arquivos
@@ -58,6 +59,21 @@ class DatabaseManager:
             connect_timeout=DB_CONNECTION_TIMEOUT_SEC,
         )
         logger.info("PostgreSQL pool initialized (2-10 connections)")
+
+    def _reset_pool(self) -> None:
+        """Fecha e reinicializa o pool de conexoes.
+
+        Usado para recuperar de erros de conexao (connection closed, etc).
+        """
+        logger.warning("Reinicializando pool de conexoes PostgreSQL...")
+        if self._pool:
+            try:
+                self._pool.closeall()
+            except Exception:
+                pass
+        self._pool = None
+        self.conn = None
+        self._initialize_pool()
 
     @contextmanager
     def get_connection(self) -> Generator[psycopg2.extensions.connection, None, None]:
@@ -465,165 +481,165 @@ class DatabaseManager:
     # =========================================================================
     # INSERCAO DE DADOS NORMALIZADOS (COMPLETA)
     # =========================================================================
-    
-    def inserir_due_completa(self, dados_normalizados: Dict) -> bool:
+
+    def _agrupar_por_due(self, dados_normalizados: dict) -> dict[str, dict]:
+        """Agrupa os dados normalizados por numero_due.
+
+        Args:
+            dados_normalizados: Dicionario com todas as tabelas como chaves.
+
+        Returns:
+            Dicionario {numero_due: {tabela: registros}}.
         """
-        Insere todos os dados normalizados de uma ou mais DUEs.
-        Recebe o dicionario com todas as tabelas como chaves.
+        dues: dict[str, dict] = {}
+
+        # Primeiro, identificar todas as DUEs a partir de due_principal
+        for registro in dados_normalizados.get('due_principal', []):
+            numero = registro.get('numero')
+            if numero:
+                dues[numero] = {'due_principal': registro}
+
+        # Para cada tabela relacionada, agrupar por numero_due
+        for tabela, registros in dados_normalizados.items():
+            if tabela == 'due_principal' or not registros:
+                continue
+            for registro in registros:
+                numero = registro.get('numero_due')
+                if numero and numero in dues:
+                    if tabela not in dues[numero]:
+                        dues[numero][tabela] = []
+                    dues[numero][tabela].append(registro)
+
+        return dues
+
+    def _inserir_registros_tabela(self, tabela: str, registros: list) -> None:
+        """Router para inserir registros na tabela correta.
+
+        Args:
+            tabela: Nome da tabela.
+            registros: Lista de registros a inserir.
         """
-        conn = None
-        try:
-            with self.use_connection() as conn:
-                # 1. due_principal
-                if dados_normalizados.get('due_principal'):
-                    for registro in dados_normalizados['due_principal']:
-                        self._inserir_due_principal_normalizado(registro)
+        if not registros:
+            return
 
-                # 2. due_eventos_historico
-                if dados_normalizados.get('due_eventos_historico'):
-                    self._inserir_batch_eventos_historico(dados_normalizados['due_eventos_historico'])
+        # Mapeamento de tabelas para metodos especificos
+        metodos_especiais = {
+            'due_eventos_historico': self._inserir_batch_eventos_historico,
+            'due_itens': self._inserir_batch_itens,
+            'due_item_tratamentos_administrativos': self._inserir_batch_tratamentos_admin,
+            'due_item_nota_fiscal_exportacao': self._inserir_batch_nf_exportacao,
+            'due_atos_concessorios_suspensao': lambda r: self._inserir_batch_atos_concessorios(
+                'due_atos_concessorios_suspensao', r
+            ),
+            'due_atos_concessorios_isencao': lambda r: self._inserir_batch_atos_concessorios(
+                'due_atos_concessorios_isencao', r
+            ),
+        }
 
-                # 3. due_itens
-                if dados_normalizados.get('due_itens'):
-                    self._inserir_batch_itens(dados_normalizados['due_itens'])
+        if tabela in metodos_especiais:
+            metodos_especiais[tabela](registros)
+        else:
+            # Usar metodo generico para outras tabelas
+            self._inserir_batch_generico(tabela, registros)
 
-                # 4. due_item_enquadramentos
-                if dados_normalizados.get('due_item_enquadramentos'):
-                    self._inserir_batch_generico(
-                        'due_item_enquadramentos',
-                        dados_normalizados['due_item_enquadramentos'],
+    def _salvar_due_individual(self, numero_due: str, dados: dict, max_retries: int = 3) -> None:
+        """Salva uma DUE individual com retry e reconexao automatica.
+
+        Args:
+            numero_due: Numero da DUE.
+            dados: Dados da DUE (due_principal + tabelas relacionadas).
+            max_retries: Numero maximo de tentativas.
+
+        Raises:
+            Exception: Se falhar apos todas as tentativas.
+        """
+        import time
+
+        for tentativa in range(max_retries):
+            try:
+                with self.get_connection() as conn:
+                    # Inserir due_principal primeiro
+                    if dados.get('due_principal'):
+                        self._inserir_due_principal_normalizado(dados['due_principal'])
+
+                    # Inserir todas as tabelas relacionadas
+                    for tabela, registros in dados.items():
+                        if tabela != 'due_principal' and registros:
+                            self._inserir_registros_tabela(tabela, registros)
+
+                    conn.commit()
+                    return  # Sucesso
+
+            except (psycopg2.OperationalError, psycopg2.InterfaceError) as e:
+                logger.warning(
+                    "Erro de conexao ao salvar DUE %s (tentativa %d/%d): %s",
+                    numero_due, tentativa + 1, max_retries, e
+                )
+                self._reset_pool()  # Forca reconexao
+                if tentativa == max_retries - 1:
+                    raise
+                time.sleep(1)  # Aguarda antes de retry
+
+            except Exception as e:
+                logger.error("Erro ao salvar DUE %s: %s", numero_due, e)
+                raise
+
+    def inserir_due_completa(self, dados_normalizados: dict) -> tuple[int, int]:
+        """Insere dados normalizados com commits por DUE para evitar perda de dados.
+
+        Cada DUE e salva individualmente com commit proprio. Se uma falhar,
+        as anteriores ja estao salvas. Inclui reconexao automatica em caso
+        de erro de conexao.
+
+        Args:
+            dados_normalizados: Dicionario com todas as tabelas como chaves.
+
+        Returns:
+            Tupla (dues_salvas, dues_erro).
+        """
+        dues_salvas = 0
+        dues_erro = 0
+        erros_conexao = 0
+        ultimo_erro_conexao = None
+
+        # Agrupar dados por numero_due
+        dues = self._agrupar_por_due(dados_normalizados)
+
+        if not dues:
+            logger.warning("Nenhuma DUE encontrada nos dados normalizados")
+            return 0, 0
+
+        total_dues = len(dues)
+        logger.info("Salvando %d DUEs no banco de dados...", total_dues)
+
+        for numero_due, dados_due in dues.items():
+            try:
+                self._salvar_due_individual(numero_due, dados_due)
+                dues_salvas += 1
+                if dues_salvas % 10 == 0:
+                    logger.info("  Progresso: %d/%d DUEs salvas", dues_salvas, total_dues)
+            except (psycopg2.OperationalError, psycopg2.InterfaceError) as e:
+                dues_erro += 1
+                erros_conexao += 1
+                ultimo_erro_conexao = str(e)
+                logger.warning("Erro de conexao ao salvar DUE %s: %s", numero_due, e)
+                # Notificar via WhatsApp apenas no primeiro erro de conexão
+                if erros_conexao == 1:
+                    notify_database_error(
+                        error=str(e),
+                        dues_salvas=dues_salvas,
+                        dues_pendentes=total_dues - dues_salvas
                     )
+            except Exception as e:
+                dues_erro += 1
+                logger.warning("Erro ao salvar DUE %s: %s", numero_due, e)
+                # Continua para a proxima DUE - nao perde as ja salvas
 
-                # 5. due_item_paises_destino
-                if dados_normalizados.get('due_item_paises_destino'):
-                    self._inserir_batch_generico(
-                        'due_item_paises_destino',
-                        dados_normalizados['due_item_paises_destino'],
-                    )
-
-                # 6. due_item_tratamentos_administrativos
-                if dados_normalizados.get('due_item_tratamentos_administrativos'):
-                    self._inserir_batch_tratamentos_admin(
-                        dados_normalizados['due_item_tratamentos_administrativos'],
-                    )
-
-                # 7. due_item_tratamentos_administrativos_orgaos
-                if dados_normalizados.get('due_item_tratamentos_administrativos_orgaos'):
-                    self._inserir_batch_generico(
-                        'due_item_tratamentos_administrativos_orgaos',
-                        dados_normalizados['due_item_tratamentos_administrativos_orgaos'],
-                    )
-
-                # 8. due_item_notas_remessa
-                if dados_normalizados.get('due_item_notas_remessa'):
-                    self._inserir_batch_generico(
-                        'due_item_notas_remessa',
-                        dados_normalizados['due_item_notas_remessa'],
-                    )
-
-                # 9. due_item_nota_fiscal_exportacao
-                if dados_normalizados.get('due_item_nota_fiscal_exportacao'):
-                    self._inserir_batch_nf_exportacao(
-                        dados_normalizados['due_item_nota_fiscal_exportacao'],
-                    )
-
-                # 10. due_item_notas_complementares
-                if dados_normalizados.get('due_item_notas_complementares'):
-                    self._inserir_batch_generico(
-                        'due_item_notas_complementares',
-                        dados_normalizados['due_item_notas_complementares'],
-                    )
-
-                # 11. due_item_atributos
-                if dados_normalizados.get('due_item_atributos'):
-                    self._inserir_batch_generico(
-                        'due_item_atributos',
-                        dados_normalizados['due_item_atributos'],
-                    )
-
-                # 12. due_item_documentos_importacao
-                if dados_normalizados.get('due_item_documentos_importacao'):
-                    self._inserir_batch_generico(
-                        'due_item_documentos_importacao',
-                        dados_normalizados['due_item_documentos_importacao'],
-                    )
-
-                # 13. due_item_documentos_transformacao
-                if dados_normalizados.get('due_item_documentos_transformacao'):
-                    self._inserir_batch_generico(
-                        'due_item_documentos_transformacao',
-                        dados_normalizados['due_item_documentos_transformacao'],
-                    )
-
-                # 14. due_item_calculo_tributario_tratamentos
-                if dados_normalizados.get('due_item_calculo_tributario_tratamentos'):
-                    self._inserir_batch_generico(
-                        'due_item_calculo_tributario_tratamentos',
-                        dados_normalizados['due_item_calculo_tributario_tratamentos'],
-                    )
-
-                # 15. due_item_calculo_tributario_quadros
-                if dados_normalizados.get('due_item_calculo_tributario_quadros'):
-                    self._inserir_batch_generico(
-                        'due_item_calculo_tributario_quadros',
-                        dados_normalizados['due_item_calculo_tributario_quadros'],
-                    )
-
-                # 16. due_situacoes_carga
-                if dados_normalizados.get('due_situacoes_carga'):
-                    self._inserir_batch_generico(
-                        'due_situacoes_carga',
-                        dados_normalizados['due_situacoes_carga'],
-                    )
-
-                # 17. due_solicitacoes
-                if dados_normalizados.get('due_solicitacoes'):
-                    self._inserir_batch_generico(
-                        'due_solicitacoes',
-                        dados_normalizados['due_solicitacoes'],
-                    )
-
-                # 18-20. Declaracao tributaria
-                for tabela in [
-                    'due_declaracao_tributaria_compensacoes',
-                    'due_declaracao_tributaria_recolhimentos',
-                    'due_declaracao_tributaria_contestacoes',
-                ]:
-                    if dados_normalizados.get(tabela):
-                        self._inserir_batch_generico(
-                            tabela,
-                            dados_normalizados[tabela],
-                        )
-
-                # 21. due_atos_concessorios_suspensao
-                if dados_normalizados.get('due_atos_concessorios_suspensao'):
-                    self._inserir_batch_atos_concessorios(
-                        'due_atos_concessorios_suspensao',
-                        dados_normalizados['due_atos_concessorios_suspensao'],
-                    )
-
-                # 22. due_atos_concessorios_isencao
-                if dados_normalizados.get('due_atos_concessorios_isencao'):
-                    self._inserir_batch_atos_concessorios(
-                        'due_atos_concessorios_isencao',
-                        dados_normalizados['due_atos_concessorios_isencao'],
-                    )
-
-                # 23. due_exigencias_fiscais
-                if dados_normalizados.get('due_exigencias_fiscais'):
-                    self._inserir_batch_generico(
-                        'due_exigencias_fiscais',
-                        dados_normalizados['due_exigencias_fiscais'],
-                    )
-
-                self.conn.commit()
-                return True
-            
-        except Exception as e:
-            if conn:
-                conn.rollback()
-            logger.error("Failed to insert full DUE: %s", e, exc_info=True)
-            return False
+        logger.info(
+            "Resultado do salvamento: %d DUEs salvas, %d erros",
+            dues_salvas, dues_erro
+        )
+        return dues_salvas, dues_erro
     
     def _limpar_valor(self, valor: Any, tipo_esperado: str = 'string') -> Any:
         """Limpa valores vazios e converte para None quando apropriado"""

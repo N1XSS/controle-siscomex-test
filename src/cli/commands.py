@@ -210,12 +210,12 @@ def atualizar_due_especifica(numero_due: str) -> None:
 
         # Salvar no banco
         logger.info(f"[INFO] Salvando no banco de dados...")
-        sucesso = db_manager.inserir_due_completa(dados_normalizados)
+        salvas, erros = db_manager.inserir_due_completa(dados_normalizados)
 
-        if sucesso:
+        if salvas > 0:
             logger.info(f"[OK] DUE {numero_due} atualizada com sucesso!")
         else:
-            logger.error(f"[ERRO] Falha ao salvar DUE no banco")
+            logger.error(f"[ERRO] Falha ao salvar DUE no banco ({erros} erros)")
 
         db_manager.desconectar()
 

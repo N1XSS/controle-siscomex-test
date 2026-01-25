@@ -212,3 +212,124 @@ def notify_sync_error(sync_type: str, error: str) -> bool:
     )
 
     return send_notification(message)
+
+
+def notify_rate_limit(wait_minutes: float, unblock_time: str) -> bool:
+    """
+    Notifica quando atinge o limite de requisições da API Siscomex (PUCX-ER1001).
+
+    Args:
+        wait_minutes: Tempo de espera em minutos
+        unblock_time: Horário previsto para desbloqueio (HH:MM:SS)
+
+    Returns:
+        True se notificação enviada com sucesso
+    """
+    timestamp = datetime.now().strftime("%d/%m/%Y %H:%M:%S")
+    message = (
+        f"⚠️ *Rate Limit SISCOMEX Atingido*\n"
+        f"━━━━━━━━━━━━━━━━━━━━\n"
+        f"🚫 Código: PUCX-ER1001\n"
+        f"⏰ Aguardando: {wait_minutes:.1f} minutos\n"
+        f"🔓 Desbloqueio às: {unblock_time}\n"
+        f"📋 O sistema pausará e retomará automaticamente\n"
+        f"🕐 {timestamp}"
+    )
+    return send_notification(message)
+
+
+def notify_database_error(
+    error: str,
+    dues_salvas: int = 0,
+    dues_pendentes: int = 0
+) -> bool:
+    """
+    Notifica erro de conexão com banco de dados.
+
+    Args:
+        error: Mensagem de erro
+        dues_salvas: Quantidade de DUEs salvas antes do erro
+        dues_pendentes: Quantidade de DUEs que não foram salvas
+
+    Returns:
+        True se notificação enviada com sucesso
+    """
+    timestamp = datetime.now().strftime("%d/%m/%Y %H:%M:%S")
+    error_msg = error[:300] if len(error) > 300 else error
+    message = (
+        f"❌ *Erro de Conexão com Banco*\n"
+        f"━━━━━━━━━━━━━━━━━━━━\n"
+        f"🔴 Erro: {error_msg}\n"
+        f"✅ DUEs salvas antes do erro: {dues_salvas}\n"
+        f"⚠️ DUEs pendentes: {dues_pendentes}\n"
+        f"📋 Verifique a conexão PostgreSQL\n"
+        f"🕐 {timestamp}"
+    )
+    return send_notification(message)
+
+
+def notify_sync_complete_detailed(
+    sync_type: str,
+    stats: dict[str, Any],
+    erros: list[str] | None = None,
+    avisos: list[str] | None = None
+) -> bool:
+    """
+    Notifica conclusão da sincronização com detalhes de erros e avisos.
+
+    Args:
+        sync_type: Tipo de sincronização (Novas DUEs, Atualização, etc.)
+        stats: Dicionário com estatísticas da execução
+        erros: Lista de mensagens de erro ocorridos
+        avisos: Lista de avisos/warnings
+
+    Returns:
+        True se notificação enviada com sucesso
+    """
+    timestamp = datetime.now().strftime("%d/%m/%Y %H:%M:%S")
+
+    # Cabeçalho baseado em se houve erros
+    tem_erro = stats.get("dues_erro", 0) > 0 or erros
+    emoji = "⚠️" if tem_erro else "✅"
+    status = "com Avisos" if tem_erro else "com Sucesso"
+
+    message = f"{emoji} *Sincronização {sync_type} Concluída {status}*\n"
+    message += "━━━━━━━━━━━━━━━━━━━━\n"
+
+    # Estatísticas principais
+    message += "📊 *Resultados:*\n"
+    message += f"  • NFs consultadas: {stats.get('nfs_consultadas', 0)}\n"
+    message += f"  • Novos vínculos: {stats.get('novos_vinculos', 0)}\n"
+    message += f"  • DUEs baixadas: {stats.get('dues_baixadas', 0)}\n"
+    message += f"  • DUEs salvas: {stats.get('dues_salvas', 0)}\n"
+
+    if stats.get('dues_erro', 0) > 0:
+        message += f"  • ❌ Erros: {stats.get('dues_erro', 0)}\n"
+
+    # Rate limit info
+    if stats.get('rate_limit_atingido'):
+        message += f"\n⚠️ *Rate Limit:*\n"
+        message += f"  • Pausas: {stats.get('pausas_rate_limit', 0)}\n"
+        if stats.get('tempo_pausado_min'):
+            message += f"  • Tempo pausado: {stats.get('tempo_pausado_min', 0):.1f} min\n"
+
+    # Erros detalhados (máximo 3)
+    if erros:
+        message += f"\n🔴 *Erros ({len(erros)}):*\n"
+        for erro in erros[:3]:
+            erro_resumido = erro[:100] + "..." if len(erro) > 100 else erro
+            message += f"  • {erro_resumido}\n"
+        if len(erros) > 3:
+            message += f"  ... e mais {len(erros) - 3} erros\n"
+
+    # Avisos (máximo 2)
+    if avisos:
+        message += f"\n⚠️ *Avisos ({len(avisos)}):*\n"
+        for aviso in avisos[:2]:
+            aviso_resumido = aviso[:100] + "..." if len(aviso) > 100 else aviso
+            message += f"  • {aviso_resumido}\n"
+
+    message += f"\n⏱️ Tempo: {stats.get('tempo_execucao', 'N/A')}\n"
+    message += f"🕐 {timestamp}"
+
+    return send_notification(message)

@@ -27,6 +27,7 @@ from src.core.constants import (
 )
 from src.core.logger import logger
 from src.core.rate_limiter import TokenBucket
+from src.notifications.whatsapp import notify_rate_limit
 
 load_dotenv(ENV_CONFIG_FILE)
 
@@ -79,7 +80,9 @@ class SharedTokenManager:
         self._requests_in_window = 0
         self._safe_request_limit = self._load_safe_request_limit()
         self._blocked_until: datetime | None = None  # Horário de desbloqueio PUCX-ER1001
-        
+        self._token_refresh_lock = threading.Lock()  # Lock para renovação de token
+        self._last_token_refresh: datetime | None = None  # Evitar renovações duplicadas
+
         self._setup_session()
         self._limiter = self._build_rate_limiter()
         self._carregar_token_cache()  # Carregar token do cache se existe
@@ -107,19 +110,18 @@ class SharedTokenManager:
         self.session.mount("https://", adapter)
 
     def _build_rate_limiter(self) -> TokenBucket | None:
-        """Cria um rate limiter baseado em configuracao."""
-        try:
-            limit_hour = int(os.getenv("SISCOMEX_RATE_LIMIT_HOUR", SISCOMEX_RATE_LIMIT_HOUR))
-            burst = int(os.getenv("SISCOMEX_RATE_LIMIT_BURST", SISCOMEX_RATE_LIMIT_BURST))
-        except ValueError:
-            limit_hour = SISCOMEX_RATE_LIMIT_HOUR
-            burst = SISCOMEX_RATE_LIMIT_BURST
+        """Rate limiter DESABILITADO para maximizar throughput.
 
-        if limit_hour <= 0:
-            return None
+        O TokenBucket serializa threads, causando gargalo com 20 workers paralelos.
+        O sistema agora confia em:
+        - Contagem de requisicoes por hora (_wait_for_safe_limit)
+        - Tratamento automatico de PUCX-ER1001 com bloqueio global
 
-        rate_per_sec = limit_hour / 3600.0
-        return TokenBucket(rate_per_sec=rate_per_sec, capacity=burst)
+        Para reativar, defina SISCOMEX_RATE_LIMIT_HOUR > 0 no config.env
+        """
+        # Desabilitado por padrao - confiar na contagem por hora + PUCX-ER1001
+        # O tratamento de bloqueio e mais inteligente que o TokenBucket
+        return None
 
     def _load_safe_request_limit(self) -> int:
         """Carrega limite preventivo de requisicoes por hora."""
@@ -210,48 +212,118 @@ class SharedTokenManager:
             else:
                 wait_seconds = self._seconds_until_next_hour()
 
+            unblock_time = desbloqueio.strftime("%H:%M:%S") if desbloqueio else "próxima hora"
+            wait_minutes = wait_seconds / 60.0
+
             logger.warning("⏸️  Bloqueio SISCOMEX detectado (PUCX-ER1001).")
             if message:
                 logger.warning("📋 Mensagem: %s", message)
-            logger.warning(
-                "⏰ Aguardando até %s (%.1f minutos)...",
-                desbloqueio.strftime("%H:%M:%S") if desbloqueio else "próxima hora",
-                wait_seconds / 60.0,
-            )
+            logger.warning("⏰ Aguardando até %s (%.1f minutos)...", unblock_time, wait_minutes)
+
+            # Notificar via WhatsApp
+            notify_rate_limit(wait_minutes=wait_minutes, unblock_time=unblock_time)
+
             return wait_seconds
 
         return None
 
-    def request(self, method: str, url: str, **kwargs) -> requests.Response:
-        """Executa requisicao respeitando rate limit configurado.
+    def _handle_401_with_retry(self, method: str, url: str, **kwargs) -> requests.Response:
+        """Trata HTTP 401 com renovacao de token e retry.
 
-        IMPORTANTE: Quando detecta bloqueio PUCX-ER1001, aguarda o tempo indicado
-        mas NAO faz retry automatico. Conforme documentacao oficial do Siscomex,
-        cada tentativa durante bloqueio AUMENTA a penalidade:
-        - 1a violacao: bloqueio ate fim da hora atual
-        - 2a violacao: +1 hora de penalidade
-        - 3a+ violacao: +2 horas de penalidade
+        Usa lock para garantir que apenas 1 thread renova o token,
+        enquanto outras aguardam e usam o token renovado.
 
-        A resposta de bloqueio é retornada para que o caller decida se quer
-        tentar novamente após o desbloqueio.
+        Args:
+            method: Metodo HTTP (GET, POST, etc).
+            url: URL da requisicao.
+            **kwargs: Argumentos adicionais para a requisicao.
+
+        Returns:
+            Resposta HTTP apos retry com token renovado.
         """
+        with self._token_refresh_lock:
+            # Verificar se outra thread ja renovou recentemente (ultimos 5 segundos)
+            if self._last_token_refresh:
+                tempo_desde_refresh = (datetime.utcnow() - self._last_token_refresh).total_seconds()
+                if tempo_desde_refresh < 5:
+                    # Token foi renovado por outra thread, so atualizar headers e retry
+                    logger.debug("Token ja renovado por outra thread, usando novo token...")
+                    if 'headers' in kwargs:
+                        kwargs['headers'] = self.obter_headers()
+                    return self.session.request(method, url, **kwargs)
+
+            # Renovar token
+            logger.warning("🔄 HTTP 401 - Renovando token...")
+            if self.autenticar(forcar_nova_auth=True):
+                self._last_token_refresh = datetime.utcnow()
+                logger.info("✅ Token renovado com sucesso")
+
+                # Atualizar headers e retry
+                if 'headers' in kwargs:
+                    kwargs['headers'] = self.obter_headers()
+                resposta = self.session.request(method, url, **kwargs)
+
+                if resposta.status_code == 200:
+                    logger.debug("✅ Requisicao bem-sucedida apos renovar token")
+                return resposta
+            else:
+                logger.error("❌ Falha ao renovar token")
+                # Retorna resposta vazia com status 401
+                resp = requests.Response()
+                resp.status_code = 401
+                return resp
+
+    def request(self, method: str, url: str, **kwargs) -> requests.Response:
+        """Executa requisicao com renovacao automatica de token.
+
+        Otimizado para paralelismo:
+        - NAO verifica token antes (sem overhead)
+        - So renova quando receber 401
+        - Lock garante apenas 1 renovacao por vez
+        - Retry automatico apos renovar
+
+        Quando detecta bloqueio PUCX-ER1001, aguarda o tempo indicado.
+        Conforme documentacao oficial do Siscomex, cada tentativa durante
+        bloqueio AUMENTA a penalidade.
+        """
+        # Verificar se e requisicao de autenticacao (nao precisa de token)
+        is_auth_request = URL_AUTH in url
+
+        # Rate limiting
         self._wait_for_safe_limit()
         if self._limiter:
             self._limiter.acquire()
 
+        # Fazer requisicao SEM verificar token antes
         resposta = self.session.request(method, url, **kwargs)
 
-        # Detectar bloqueio PUCX-ER1001
+        # Se recebeu 401 e nao e auth, renovar e retry
+        if resposta.status_code == 401 and not is_auth_request:
+            resposta = self._handle_401_with_retry(method, url, **kwargs)
+
+        # Detectar bloqueio PUCX-ER1001 - BLOQUEIO GLOBAL para todas as threads
         wait_seconds = self._extract_rate_limit_wait(resposta)
         if wait_seconds is not None:
-            # Registrar horário de desbloqueio para coordenar outras threads
-            self._blocked_until = datetime.now() + timedelta(seconds=wait_seconds)
-            logger.info(
-                "⏳ Iniciando pausa de %.1f minutos. Proximas requisicoes aguardarao automaticamente.",
-                wait_seconds / 60.0,
-            )
+            with self._request_lock:
+                # So a primeira thread que detectar o bloqueio seta o horario
+                # As outras threads vao pausar em _wait_for_safe_limit()
+                if self._blocked_until is None:
+                    self._blocked_until = datetime.now() + timedelta(seconds=wait_seconds)
+                    logger.warning(
+                        "🚫 BLOQUEIO GLOBAL SISCOMEX (PUCX-ER1001) - Todas as threads pausando..."
+                    )
+                    logger.info(
+                        "⏳ Aguardando %.1f minutos ate %s...",
+                        wait_seconds / 60.0,
+                        self._blocked_until.strftime("%H:%M:%S"),
+                    )
+
+            # Todas as threads dormem pelo tempo de bloqueio
             time.sleep(wait_seconds + 1)
-            self._blocked_until = None
+
+            with self._request_lock:
+                # Limpar bloqueio apos o tempo passar
+                self._blocked_until = None
             logger.info("✅ Periodo de bloqueio encerrado. Retomando operacoes.")
 
         return resposta

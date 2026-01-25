@@ -1393,11 +1393,12 @@ def salvar_resultados_normalizados(
             logger.info(f"   ⚠️  {tabela} → Sem dados")
     
     # Inserir no banco
-    if db_manager.inserir_due_completa(dados_normalizados):
+    salvas, erros = db_manager.inserir_due_completa(dados_normalizados)
+    if salvas > 0:
         logger.info("-" * 50)
-        logger.info(f"📊 {tabelas_salvas} tabelas salvas, {total_registros} registros no PostgreSQL")
+        logger.info(f"📊 {tabelas_salvas} tabelas, {total_registros} registros, {salvas} DUEs salvas no PostgreSQL")
     else:
-        logger.error("[ERRO] Falha ao salvar no PostgreSQL")
+        logger.error(f"[ERRO] Falha ao salvar no PostgreSQL ({erros} erros)")
 
 
 def _salvar_resultados_normalizados_csv(

@@ -59,6 +59,7 @@ from src.processors.due import (
     processar_dados_due,
     salvar_resultados_normalizados,
 )
+from src.notifications.whatsapp import notify_sync_complete_detailed
 
 warnings.filterwarnings("ignore")
 load_dotenv(ENV_CONFIG_FILE)
@@ -273,6 +274,12 @@ def baixar_due_completa(numero_due: str) -> dict[str, Any] | None:
 @timed
 def processar_novas_nfs() -> None:
     """Processa NFs do SAP que ainda nao tem DUE vinculada"""
+    # Variaveis para rastreamento de erros e estatisticas
+    inicio_execucao = datetime.now()
+    erros_coletados: list[str] = []
+    avisos_coletados: list[str] = []
+    dues_salvas_banco = 0
+
     try:
         parser = argparse.ArgumentParser(description='Sincronizar novas NFs com DUEs')
         parser.add_argument('--limit', type=int, default=0,
@@ -282,7 +289,7 @@ def processar_novas_nfs() -> None:
         parser.add_argument('--workers-download', type=int, default=DUE_DOWNLOAD_WORKERS,
                         help=f'Numero de workers paralelos para download de DUEs (default: {DUE_DOWNLOAD_WORKERS})')
         args = parser.parse_args()
-        
+
         logger.info("=" * 60)
         logger.info("SINCRONIZACAO DE NOVAS DUEs")
         logger.info("=" * 60)
@@ -443,10 +450,12 @@ def processar_novas_nfs() -> None:
                                 dues_ok += 1
                             else:
                                 dues_erro += 1
+                                erros_coletados.append(f"DUE {numero_due}: falha ao baixar dados")
 
                         except Exception as e:
                             logger.warning(f"Erro ao processar DUE {numero_due}: {e}")
                             dues_erro += 1
+                            erros_coletados.append(f"DUE {numero_due}: {str(e)[:80]}")
             else:
                 # Fallback para processamento sequencial (se desabilitado ou uma única DUE)
                 logger.info("  Baixando DUEs sequencialmente...")
@@ -464,17 +473,36 @@ def processar_novas_nfs() -> None:
                         dues_ok += 1
                     else:
                         dues_erro += 1
+                        erros_coletados.append(f"DUE {numero_due}: falha ao baixar dados (sequencial)")
 
-            
             logger.info(f"\n[OK] {dues_ok} DUEs baixadas com sucesso")
             if dues_erro > 0:
-                logger.warning(f"[AVISO] {dues_erro} DUEs com erro")
-            
-            # Salvar dados
+                logger.warning(f"[AVISO] {dues_erro} DUEs com erro no download")
+
+            # Salvar dados no banco
             if dues_ok > 0:
-                salvar_resultados_normalizados(dados_consolidados)
-        
-        # 9. Resumo
+                resultado = salvar_resultados_normalizados(dados_consolidados)
+                # Verificar se retornou tupla (dues_salvas, dues_erro)
+                if isinstance(resultado, tuple):
+                    dues_salvas_banco, erros_banco = resultado
+                    if erros_banco > 0:
+                        avisos_coletados.append(f"{erros_banco} DUEs falharam ao salvar no banco")
+                else:
+                    dues_salvas_banco = dues_ok  # fallback
+
+        # 9. Calcular tempo de execução
+        fim_execucao = datetime.now()
+        tempo_total = fim_execucao - inicio_execucao
+        horas, resto = divmod(tempo_total.seconds, 3600)
+        minutos, segundos = divmod(resto, 60)
+        if horas > 0:
+            tempo_execucao_str = f"{horas}h {minutos}min {segundos}s"
+        elif minutos > 0:
+            tempo_execucao_str = f"{minutos}min {segundos}s"
+        else:
+            tempo_execucao_str = f"{segundos}s"
+
+        # 10. Resumo detalhado
         logger.info("\n" + "=" * 60)
         logger.info("SINCRONIZACAO CONCLUIDA")
         logger.info("=" * 60)
@@ -485,30 +513,54 @@ def processar_novas_nfs() -> None:
         logger.info(f"  NFs consultadas: {max_consultas}")
         logger.info(f"  Novos vinculos: {len(novos_vinculos)}")
         logger.info(f"  DUEs baixadas: {len(dues_para_baixar)}")
+        logger.info(f"  DUEs salvas no banco: {dues_salvas_banco}")
+        logger.info(f"  Tempo total: {tempo_execucao_str}")
+
+        if erros_coletados:
+            logger.warning(f"\n[ERROS] {len(erros_coletados)} erro(s) durante a execucao:")
+            for erro in erros_coletados[:5]:
+                logger.warning(f"  - {erro}")
+            if len(erros_coletados) > 5:
+                logger.warning(f"  ... e mais {len(erros_coletados) - 5} erros")
 
         if len(nfs_sem_vinculo) > max_consultas:
             restantes = len(nfs_sem_vinculo) - max_consultas
             logger.info(f"\n[INFO] Restam {restantes} NFs para processar na proxima execucao")
 
-        # Salvar estatísticas para notificação WhatsApp
+        # 11. Notificação WhatsApp detalhada
+        stats = {
+            'nfs_consultadas': max_consultas,
+            'novos_vinculos': len(novos_vinculos),
+            'dues_baixadas': len(dues_para_baixar),
+            'dues_salvas': dues_salvas_banco,
+            'dues_erro': dues_erro + len([e for e in erros_coletados if 'banco' in e.lower()]),
+            'tempo_execucao': tempo_execucao_str,
+        }
+        notify_sync_complete_detailed("Novas DUEs", stats, erros_coletados, avisos_coletados)
+
+        # 12. Salvar estatísticas em arquivo (compatibilidade)
         try:
             import json
             stats_file = '.sync_stats_novas.json'
-            stats_data = {
-                'novos_vinculos': len(novos_vinculos),
-                'dues_baixadas': len(dues_para_baixar),
-                'nfs_consultadas': max_consultas,
-                'dues_sucesso': dues_ok,
-                'dues_erro': dues_erro,
-            }
             with open(stats_file, 'w', encoding='utf-8') as f:
-                json.dump(stats_data, f)
+                json.dump(stats, f)
         except Exception as e:
             logger.debug(f"Erro ao salvar estatísticas: {e}")
+
     except ControleSiscomexError as exc:
         logger.error("[ERRO] %s", exc)
+        erros_coletados.append(f"Erro de configuração: {str(exc)[:100]}")
+        # Notificar erro via WhatsApp
+        tempo_total = datetime.now() - inicio_execucao
+        stats = {'tempo_execucao': str(tempo_total), 'dues_erro': 1}
+        notify_sync_complete_detailed("Novas DUEs", stats, erros_coletados, avisos_coletados)
     except Exception as exc:
         logger.error("[ERRO] Falha inesperada: %s", exc, exc_info=True)
+        erros_coletados.append(f"Erro inesperado: {str(exc)[:100]}")
+        # Notificar erro via WhatsApp
+        tempo_total = datetime.now() - inicio_execucao
+        stats = {'tempo_execucao': str(tempo_total), 'dues_erro': 1}
+        notify_sync_complete_detailed("Novas DUEs", stats, erros_coletados, avisos_coletados)
 
 
 def main() -> None:

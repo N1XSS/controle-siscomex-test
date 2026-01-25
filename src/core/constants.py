@@ -7,12 +7,16 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 
-PROJECT_ROOT = Path(__file__).resolve().parent
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
-ENV_CONFIG_FILE = "config.env"
+# Use an absolute path so config.env loads correctly even when cwd is elsewhere.
+ENV_CONFIG_FILE = str(PROJECT_ROOT / "config.env")
 
-# Carregar variaveis do .env antes de ler configuracoes
-load_dotenv(ENV_CONFIG_FILE)
+# Carregar variaveis do .env antes de ler configuracoes.
+# Em producao (ex: Dokploy), prefira variables do ambiente.
+USE_DOTENV = os.getenv("USE_DOTENV", "true").strip().lower() in {"1", "true", "yes", "y", "on"}
+if USE_DOTENV:
+    load_dotenv(ENV_CONFIG_FILE, override=False)
 SCRIPTS_DIR = "scripts"
 
 SCRIPT_SAP = "src.api.athena.client"
@@ -29,14 +33,21 @@ SISCOMEX_RATE_LIMIT_BURST = int(os.getenv("SISCOMEX_RATE_LIMIT_BURST", "20"))
 SISCOMEX_TOKEN_VALIDITY_MIN = 60
 SISCOMEX_TOKEN_SAFETY_MARGIN_MIN = 2
 SISCOMEX_AUTH_INTERVAL_SEC = 60
-SISCOMEX_SAFE_REQUEST_LIMIT = int(os.getenv("SISCOMEX_SAFE_REQUEST_LIMIT", "900"))
+SISCOMEX_SAFE_REQUEST_LIMIT = int(os.getenv("SISCOMEX_SAFE_REQUEST_LIMIT", "950"))
 
 # =============================================================================
 # CONSULTAS SUPLEMENTARES DUE
 # =============================================================================
-SISCOMEX_FETCH_ATOS_SUSPENSAO = os.getenv("SISCOMEX_FETCH_ATOS_SUSPENSAO", "true").lower() == "true"
-SISCOMEX_FETCH_ATOS_ISENCAO = os.getenv("SISCOMEX_FETCH_ATOS_ISENCAO", "false").lower() == "true"
-SISCOMEX_FETCH_EXIGENCIAS_FISCAIS = os.getenv("SISCOMEX_FETCH_EXIGENCIAS_FISCAIS", "true").lower() == "true"
+def _get_bool_env(name: str, default: bool) -> bool:
+    value = os.getenv(name)
+    if value is None:
+        return default
+    return value.strip().lower() in {"1", "true", "yes", "y", "on"}
+
+
+SISCOMEX_FETCH_ATOS_SUSPENSAO = _get_bool_env("SISCOMEX_FETCH_ATOS_SUSPENSAO", True)
+SISCOMEX_FETCH_ATOS_ISENCAO = _get_bool_env("SISCOMEX_FETCH_ATOS_ISENCAO", False)
+SISCOMEX_FETCH_EXIGENCIAS_FISCAIS = _get_bool_env("SISCOMEX_FETCH_EXIGENCIAS_FISCAIS", True)
 
 # =============================================================================
 # LIMITES DE PROCESSAMENTO
