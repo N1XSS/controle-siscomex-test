@@ -102,6 +102,9 @@ def buscar_dados_complementares(
                 f"HTTP {response.status_code}"
             )
             return None
+    except RateLimitError:
+        # Propagar rate limit para salvar dados parciais
+        raise
     except requests.exceptions.JSONDecodeError as e:
         logger.warning(f"[AVISO] Erro ao decodificar JSON de {tipo}: {e}")
         return None

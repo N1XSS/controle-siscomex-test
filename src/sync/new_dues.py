@@ -103,6 +103,9 @@ def buscar_dados_complementares(
                 f"HTTP {response.status_code}"
             )
             return None
+    except RateLimitError:
+        # Propagar rate limit para salvar dados parciais
+        raise
     except Exception as e:
         logger.warning(f"[AVISO] Erro ao buscar {tipo}: {e}")
         return None

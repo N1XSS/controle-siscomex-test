@@ -27,6 +27,7 @@ from src.core.constants import (
 )
 from src.core.logger import logger
 from src.core.rate_limiter import TokenBucket
+from src.core.exceptions import RateLimitError
 from src.notifications.whatsapp import notify_rate_limit
 
 load_dotenv(ENV_CONFIG_FILE)
@@ -142,45 +143,48 @@ class SharedTokenManager:
         return max(0.0, (next_hour - now).total_seconds())
 
     def _wait_for_safe_limit(self) -> None:
-        """Pausa automaticamente quando atingir limite preventivo ou bloqueio ativo.
+        """Verifica limites e lança exceção se bloqueio ativo.
 
-        Verifica primeiro se há bloqueio PUCX-ER1001 ativo (para coordenar threads),
+        Verifica primeiro se há bloqueio PUCX-ER1001 ativo,
         depois verifica o limite preventivo de requisições por hora.
+
+        Raises:
+            RateLimitError: Se houver bloqueio PUCX-ER1001 ativo ou limite preventivo atingido.
         """
         # Verificar se está em período de bloqueio PUCX-ER1001
-        # Isso coordena todas as threads para aguardarem juntas
+        # NOVO: Lançar exceção em vez de fazer sleep - permite salvar dados parciais
         if self._blocked_until is not None:
             wait = (self._blocked_until - datetime.now()).total_seconds()
             if wait > 0:
-                logger.warning(
-                    "⏸️  Bloqueio SISCOMEX ativo. Aguardando %.1f minutos até %s...",
-                    wait / 60.0,
-                    self._blocked_until.strftime("%H:%M:%S"),
+                raise RateLimitError(
+                    f"PUCX-ER1001: Bloqueio ativo. Desbloqueio às {self._blocked_until.strftime('%H:%M:%S')}",
+                    retry_after=int(wait)
                 )
-                time.sleep(wait + 1)
+            else:
+                # Bloqueio expirou, limpar
+                with self._request_lock:
+                    self._blocked_until = None
 
         if self._safe_request_limit <= 0:
             return
 
-        while True:
-            with self._request_lock:
-                now = datetime.now()
-                if now >= self._request_window_start + timedelta(hours=1):
-                    self._request_window_start = self._current_window_start()
-                    self._requests_in_window = 0
+        with self._request_lock:
+            now = datetime.now()
+            if now >= self._request_window_start + timedelta(hours=1):
+                self._request_window_start = self._current_window_start()
+                self._requests_in_window = 0
 
-                if self._requests_in_window < self._safe_request_limit:
-                    self._requests_in_window += 1
-                    return
+            if self._requests_in_window < self._safe_request_limit:
+                self._requests_in_window += 1
+                return
 
-                wait_seconds = self._seconds_until_next_hour()
-                logger.warning(
-                    "⏸️  Limite preventivo SISCOMEX atingido (%s req/h). Aguardando %.1f minutos...",
-                    self._safe_request_limit,
-                    wait_seconds / 60.0,
-                )
+            wait_seconds = self._seconds_until_next_hour()
 
-            time.sleep(wait_seconds + 1)
+        # NOVO: Lançar exceção em vez de fazer sleep - permite salvar dados parciais
+        raise RateLimitError(
+            f"Limite preventivo SISCOMEX atingido ({self._safe_request_limit} req/h)",
+            retry_after=int(wait_seconds)
+        )
 
     def _parse_block_until(self, message: str) -> datetime | None:
         """Extrai horário de desbloqueio da mensagem PUCX-ER1001."""
@@ -301,30 +305,23 @@ class SharedTokenManager:
         if resposta.status_code == 401 and not is_auth_request:
             resposta = self._handle_401_with_retry(method, url, **kwargs)
 
-        # Detectar bloqueio PUCX-ER1001 - BLOQUEIO GLOBAL para todas as threads
+        # Detectar bloqueio PUCX-ER1001 - LANÇAR EXCEÇÃO para salvar dados parciais
         wait_seconds = self._extract_rate_limit_wait(resposta)
         if wait_seconds is not None:
             with self._request_lock:
-                # So a primeira thread que detectar o bloqueio seta o horario
-                # As outras threads vao pausar em _wait_for_safe_limit()
+                # Setar horário de desbloqueio para outras threads saberem
                 if self._blocked_until is None:
                     self._blocked_until = datetime.now() + timedelta(seconds=wait_seconds)
                     logger.warning(
-                        "🚫 BLOQUEIO GLOBAL SISCOMEX (PUCX-ER1001) - Todas as threads pausando..."
-                    )
-                    logger.info(
-                        "⏳ Aguardando %.1f minutos ate %s...",
-                        wait_seconds / 60.0,
-                        self._blocked_until.strftime("%H:%M:%S"),
+                        "🚫 BLOQUEIO SISCOMEX (PUCX-ER1001) - Lançando exceção para salvar dados parciais..."
                     )
 
-            # Todas as threads dormem pelo tempo de bloqueio
-            time.sleep(wait_seconds + 1)
-
-            with self._request_lock:
-                # Limpar bloqueio apos o tempo passar
-                self._blocked_until = None
-            logger.info("✅ Periodo de bloqueio encerrado. Retomando operacoes.")
+            # NOVO: Lançar exceção em vez de fazer sleep
+            # Isso permite que o código de nível superior salve os dados antes de pausar
+            raise RateLimitError(
+                f"PUCX-ER1001: Rate limit atingido. Desbloqueio às {self._blocked_until.strftime('%H:%M:%S')}",
+                retry_after=int(wait_seconds)
+            )
 
         return resposta
     
