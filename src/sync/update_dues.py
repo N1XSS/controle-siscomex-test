@@ -56,6 +56,7 @@ from src.core.exceptions import (
     ConfigurationError,
     ControleSiscomexError,
     DUEProcessingError,
+    RateLimitError,
     SiscomexAPIError,
 )
 from src.api.siscomex.token import token_manager
@@ -265,17 +266,27 @@ def verificar_se_due_mudou(numero_due: str, data_registro_bd: Any) -> bool:
         
         if response.status_code == 401:
             return None, None, "Token expirado (401)"
-        
+
+        if response.status_code == 429:
+            retry_after = int(response.headers.get('Retry-After', 3600))
+            raise RateLimitError(f"Rate limit atingido para DUE {numero_due}", retry_after=retry_after)
+
         if response.status_code == 404:
             return None, None, f"DUE não encontrada (404)"
-        
+
         if response.status_code == 422:
             return None, None, f"Erro de validação (422) - possível rate limiting"
-        
+
         if response.status_code != 200:
             return None, None, f"Status HTTP {response.status_code}"
-        
+
         dados = response.json()
+
+        # Verificar se é erro PUCX-ER1001 (rate limit do Siscomex retornado como 200)
+        if isinstance(dados, dict) and dados.get('code') == 'PUCX-ER1001':
+            msg = dados.get('message', 'Rate limit atingido')
+            raise RateLimitError(f"PUCX-ER1001: {msg}", retry_after=3600)
+
         data_registro_api_str = dados.get('dataDeRegistro', '')
         
         if not data_registro_api_str:
@@ -363,6 +374,9 @@ def baixar_due_pendente_completa(due_info: dict[str, Any]) -> dict[str, Any] | N
 
     Returns:
         Dicionário com dados normalizados da DUE ou None em caso de erro
+
+    Raises:
+        RateLimitError: Se o rate limit da API for atingido (429)
     """
     try:
         from src.processors.due import processar_dados_due, consultar_due_completa
@@ -383,9 +397,46 @@ def baixar_due_pendente_completa(due_info: dict[str, Any]) -> dict[str, Any] | N
 
         return dados_norm
 
+    except RateLimitError:
+        # Propagar rate limit para que o chamador possa salvar dados parciais
+        raise
     except Exception as e:
         logger.warning(f"Erro ao baixar DUE {due_info.get('numero', 'DESCONHECIDA')}: {e}")
         return None
+
+
+def _salvar_dados_parciais(dados_consolidados: dict, motivo: str) -> int:
+    """
+    Salva dados parciais no banco quando há interrupção.
+
+    Args:
+        dados_consolidados: Dados já baixados para salvar
+        motivo: Motivo da interrupção (ex: "rate limit", "interrupcao manual")
+
+    Returns:
+        Número de DUEs salvas
+    """
+    from src.processors.due import salvar_resultados_normalizados
+
+    # Contar DUEs nos dados
+    dues_pendentes = len(dados_consolidados.get('due_principal', []))
+
+    if dues_pendentes == 0:
+        logger.info(f"[INFO] Nenhum dado para salvar ({motivo})")
+        return 0
+
+    logger.warning(f"\n{'='*60}")
+    logger.warning(f"⚠️ SALVANDO DADOS PARCIAIS ({motivo})")
+    logger.warning(f"{'='*60}")
+    logger.info(f"[INFO] {dues_pendentes} DUEs pendentes para salvar...")
+
+    try:
+        salvas, erros = salvar_resultados_normalizados(dados_consolidados)
+        logger.info(f"[OK] {salvas} DUEs salvas com sucesso, {erros} erros")
+        return salvas
+    except Exception as e:
+        logger.error(f"[ERRO] Falha ao salvar dados parciais: {e}")
+        return 0
 
 
 @timed
@@ -668,29 +719,81 @@ def atualizar_dues() -> None:
         # 5. Processar DUEs ÓRFÃS + PENDENTES (atualizar/baixar direto)
         dues_orfas = dues_info.get('orfas', [])
         dues_pendentes = dues_orfas + dues_info['pendentes'] + dues_info['averbadas_recentes']
+        rate_limit_atingido = False
+        interrupcao_manual = False
+
         if dues_pendentes:
-            # Usar processamento paralelo se habilitado
-            if ENABLE_PARALLEL_DOWNLOADS and len(dues_pendentes) > 1:
-                max_workers = max(1, args.workers_download)
-                logger.info(f"\n[FASE 1] Atualizando {len(dues_pendentes)} DUEs orfas/pendentes/recentes (PARALELO: {max_workers} workers)...")
+            try:
+                # Usar processamento paralelo se habilitado
+                if ENABLE_PARALLEL_DOWNLOADS and len(dues_pendentes) > 1:
+                    max_workers = max(1, args.workers_download)
+                    logger.info(f"\n[FASE 1] Atualizando {len(dues_pendentes)} DUEs orfas/pendentes/recentes (PARALELO: {max_workers} workers)...")
 
-                with ThreadPoolExecutor(max_workers=max_workers) as executor:
-                    # Submeter todas as DUEs para download paralelo
-                    future_to_due = {
-                        executor.submit(baixar_due_pendente_completa, due_info): due_info
-                        for due_info in dues_pendentes
-                    }
+                    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+                        # Submeter todas as DUEs para download paralelo
+                        future_to_due = {
+                            executor.submit(baixar_due_pendente_completa, due_info): due_info
+                            for due_info in dues_pendentes
+                        }
 
-                    # Processar resultados conforme completam
-                    for i, future in enumerate(as_completed(future_to_due), 1):
-                        due_info = future_to_due[future]
+                        # Processar resultados conforme completam
+                        for i, future in enumerate(as_completed(future_to_due), 1):
+                            due_info = future_to_due[future]
+                            numero_due = due_info['numero']
+
+                            if i % 25 == 0:
+                                logger.info(f"  [PROGRESSO] {i}/{len(dues_pendentes)}...")
+
+                            try:
+                                dados_norm = future.result()
+
+                                if dados_norm:
+                                    for tabela, dados in dados_norm.items():
+                                        if tabela in dados_consolidados:
+                                            dados_consolidados[tabela].extend(dados)
+
+                                    if due_info in dues_orfas:
+                                        stats['orfas_ok'] += 1
+                                    elif due_info in dues_info['pendentes']:
+                                        stats['pendentes_ok'] += 1
+                                    else:
+                                        stats['averbadas_recentes_ok'] += 1
+                                else:
+                                    if due_info in dues_orfas:
+                                        stats['orfas_erro'] += 1
+                                    elif due_info in dues_info['pendentes']:
+                                        stats['pendentes_erro'] += 1
+                                    else:
+                                        stats['averbadas_recentes_erro'] += 1
+
+                            except RateLimitError as e:
+                                logger.warning(f"⚠️ Rate limit atingido! Salvando dados parciais...")
+                                rate_limit_atingido = True
+                                # Cancelar tarefas pendentes
+                                for f in future_to_due:
+                                    f.cancel()
+                                break
+
+                            except Exception as e:
+                                logger.warning(f"Erro ao processar DUE {numero_due}: {e}")
+                                if due_info in dues_orfas:
+                                    stats['orfas_erro'] += 1
+                                elif due_info in dues_info['pendentes']:
+                                    stats['pendentes_erro'] += 1
+                                else:
+                                    stats['averbadas_recentes_erro'] += 1
+                else:
+                    # Fallback para processamento sequencial (se desabilitado ou uma única DUE)
+                    logger.info(f"\n[FASE 1] Atualizando {len(dues_pendentes)} DUEs orfas/pendentes/recentes (SEQUENCIAL)...")
+
+                    for i, due_info in enumerate(dues_pendentes, 1):
                         numero_due = due_info['numero']
 
                         if i % 25 == 0:
                             logger.info(f"  [PROGRESSO] {i}/{len(dues_pendentes)}...")
 
                         try:
-                            dados_norm = future.result()
+                            dados_norm = baixar_due_pendente_completa(due_info)
 
                             if dados_norm:
                                 for tabela, dados in dados_norm.items():
@@ -711,85 +814,71 @@ def atualizar_dues() -> None:
                                 else:
                                     stats['averbadas_recentes_erro'] += 1
 
-                        except Exception as e:
-                            logger.warning(f"Erro ao processar DUE {numero_due}: {e}")
-                            if due_info in dues_orfas:
-                                stats['orfas_erro'] += 1
-                            elif due_info in dues_info['pendentes']:
-                                stats['pendentes_erro'] += 1
-                            else:
-                                stats['averbadas_recentes_erro'] += 1
-            else:
-                # Fallback para processamento sequencial (se desabilitado ou uma única DUE)
-                logger.info(f"\n[FASE 1] Atualizando {len(dues_pendentes)} DUEs orfas/pendentes/recentes (SEQUENCIAL)...")
+                        except RateLimitError as e:
+                            logger.warning(f"⚠️ Rate limit atingido! Salvando dados parciais...")
+                            rate_limit_atingido = True
+                            break
 
-                for i, due_info in enumerate(dues_pendentes, 1):
-                    numero_due = due_info['numero']
+            except KeyboardInterrupt:
+                logger.warning("\n⚠️ Interrupção manual detectada (Ctrl+C)! Salvando dados parciais...")
+                interrupcao_manual = True
 
-                    if i % 25 == 0:
-                        logger.info(f"  [PROGRESSO] {i}/{len(dues_pendentes)}...")
-
-                    dados_norm = baixar_due_pendente_completa(due_info)
-
-                    if dados_norm:
-                        for tabela, dados in dados_norm.items():
-                            if tabela in dados_consolidados:
-                                dados_consolidados[tabela].extend(dados)
-
-                        if due_info in dues_orfas:
-                            stats['orfas_ok'] += 1
-                        elif due_info in dues_info['pendentes']:
-                            stats['pendentes_ok'] += 1
-                        else:
-                            stats['averbadas_recentes_ok'] += 1
-                    else:
-                        if due_info in dues_orfas:
-                            stats['orfas_erro'] += 1
-                        elif due_info in dues_info['pendentes']:
-                            stats['pendentes_erro'] += 1
-                        else:
-                            stats['averbadas_recentes_erro'] += 1
-
-        
-        # 6. Processar DUEs AVERBADAS ANTIGAS (verificar antes) - PARALELO
+        # Salvar dados parciais se houve interrupção na fase 1
         dues_sem_mudanca = []
         dues_com_erro = []
-        if dues_info['averbadas_antigas']:
-            logger.info(f"\n[FASE 2] Verificando {len(dues_info['averbadas_antigas'])} DUEs averbadas antigas (PARALELO)...")
-            
-            # Processar em paralelo
-            dados_paralelos, dues_sem_mudanca, stats_paralelos, dues_com_erro = processar_dues_averbadas_antigas_paralelo(
-                dues_info['averbadas_antigas']
-            )
-            
-            # Consolidar dados paralelos
-            for tabela, dados in dados_paralelos.items():
-                if tabela in dados_consolidados and dados:
-                    dados_consolidados[tabela].extend(dados)
-            
-            # Atualizar estatísticas
-            stats['averbadas_antigas_mudou'] = stats_paralelos['mudou']
-            stats['averbadas_antigas_sem_mudanca'] = stats_paralelos['sem_mudanca']
-            stats['averbadas_antigas_erro'] = stats_paralelos['erros']
-            
-            # Atualizar data_ultima_atualizacao em batch para DUEs que não mudaram
-            if dues_sem_mudanca:
-                logger.info(f"\n[INFO] Atualizando data_ultima_atualizacao para {len(dues_sem_mudanca)} DUEs sem mudança...")
-                count_atualizado = db_manager.atualizar_data_ultima_atualizacao_batch(dues_sem_mudanca)
-                if count_atualizado > 0:
-                    logger.info(f"[OK] {count_atualizado} DUEs atualizadas em batch")
-        
-        # 7. Salvar dados atualizados
-        total_atualizadas = (
-            stats['orfas_ok']
-            + stats['pendentes_ok']
-            + stats['averbadas_recentes_ok']
-            + stats['averbadas_antigas_mudou']
-        )
-        
-        if total_atualizadas > 0:
-            logger.info(f"\n[INFO] Salvando {total_atualizadas} DUEs atualizadas...")
-            salvar_resultados_normalizados(dados_consolidados)
+
+        if rate_limit_atingido or interrupcao_manual:
+            motivo = "rate limit 429" if rate_limit_atingido else "interrupcao manual"
+            _salvar_dados_parciais(dados_consolidados, motivo)
+            # Pular fase 2 e 7 - dados já foram salvos
+        else:
+            # 6. Processar DUEs AVERBADAS ANTIGAS (verificar antes) - PARALELO
+            if dues_info['averbadas_antigas']:
+                try:
+                    logger.info(f"\n[FASE 2] Verificando {len(dues_info['averbadas_antigas'])} DUEs averbadas antigas (PARALELO)...")
+
+                    # Processar em paralelo
+                    dados_paralelos, dues_sem_mudanca, stats_paralelos, dues_com_erro = processar_dues_averbadas_antigas_paralelo(
+                        dues_info['averbadas_antigas']
+                    )
+
+                    # Consolidar dados paralelos
+                    for tabela, dados in dados_paralelos.items():
+                        if tabela in dados_consolidados and dados:
+                            dados_consolidados[tabela].extend(dados)
+
+                    # Atualizar estatísticas
+                    stats['averbadas_antigas_mudou'] = stats_paralelos['mudou']
+                    stats['averbadas_antigas_sem_mudanca'] = stats_paralelos['sem_mudanca']
+                    stats['averbadas_antigas_erro'] = stats_paralelos['erros']
+
+                    # Atualizar data_ultima_atualizacao em batch para DUEs que não mudaram
+                    if dues_sem_mudanca:
+                        logger.info(f"\n[INFO] Atualizando data_ultima_atualizacao para {len(dues_sem_mudanca)} DUEs sem mudança...")
+                        count_atualizado = db_manager.atualizar_data_ultima_atualizacao_batch(dues_sem_mudanca)
+                        if count_atualizado > 0:
+                            logger.info(f"[OK] {count_atualizado} DUEs atualizadas em batch")
+
+                except (KeyboardInterrupt, RateLimitError) as e:
+                    motivo = "rate limit 429" if isinstance(e, RateLimitError) else "interrupcao manual na fase 2"
+                    logger.warning(f"\n⚠️ Interrupção na fase 2! Salvando dados parciais...")
+                    _salvar_dados_parciais(dados_consolidados, motivo)
+                    # Não executar salvamento normal - dados já foram salvos
+                    rate_limit_atingido = isinstance(e, RateLimitError)
+                    interrupcao_manual = not rate_limit_atingido
+
+            # 7. Salvar dados atualizados (fluxo normal sem interrupção)
+            if not rate_limit_atingido and not interrupcao_manual:
+                total_atualizadas = (
+                    stats['orfas_ok']
+                    + stats['pendentes_ok']
+                    + stats['averbadas_recentes_ok']
+                    + stats['averbadas_antigas_mudou']
+                )
+
+                if total_atualizadas > 0:
+                    logger.info(f"\n[INFO] Salvando {total_atualizadas} DUEs atualizadas...")
+                    salvar_resultados_normalizados(dados_consolidados)
         
         # 8. Resumo
         logger.info("\n" + "=" * 60)

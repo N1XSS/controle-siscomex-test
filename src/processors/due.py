@@ -23,6 +23,7 @@ from src.core.constants import (
 from src.database.manager import db_manager
 from src.core.logger import logger
 from src.api.siscomex.token import token_manager
+from src.core.exceptions import RateLimitError
 warnings.filterwarnings('ignore')
 
 # Flag para usar PostgreSQL (OBRIGATÓRIO - CSV removido)
@@ -626,10 +627,21 @@ def consultar_due_completa(numero_due: str, debug_mode: bool = False) -> dict[st
                     if debug_mode:
                         logger.info(f"🔑 Token expirado ao consultar DUE completa: {numero_due}")
                     return {"error": "token_expirado", "numero_due": numero_due}
-                
+
+                if response.status_code == 429:
+                    retry_after = int(response.headers.get('Retry-After', 3600))
+                    logger.warning(f"⚠️ Rate limit atingido (429) para DUE {numero_due}. Retry-After: {retry_after}s")
+                    raise RateLimitError(f"Rate limit atingido para DUE {numero_due}", retry_after=retry_after)
+
                 if response.status_code == 200:
                     dados_completos = response.json()
-                    
+
+                    # Verificar se é erro PUCX-ER1001 (rate limit do Siscomex retornado como 200)
+                    if isinstance(dados_completos, dict) and dados_completos.get('code') == 'PUCX-ER1001':
+                        msg = dados_completos.get('message', 'Rate limit atingido')
+                        logger.warning(f"⚠️ Rate limit Siscomex (PUCX-ER1001) para DUE {numero_due}: {msg}")
+                        raise RateLimitError(f"PUCX-ER1001: {msg}", retry_after=3600)
+
                     # Debug: verificar estrutura dos dados retornados
                     if dados_completos:
                         if debug_mode:
@@ -690,7 +702,12 @@ def consultar_due_por_nf(chave_nf: str, debug_mode: bool = False) -> dict[str, A
             if debug_mode:
                 logger.info(f"🔑 Token expirado na primeira consulta")
             return {"error": "token_expirado", "chave": chave_nf}
-        
+
+        if response1.status_code == 429:
+            retry_after = int(response1.headers.get('Retry-After', 3600))
+            logger.warning(f"⚠️ Rate limit atingido (429) para NF {chave_nf[:20]}. Retry-After: {retry_after}s")
+            raise RateLimitError(f"Rate limit atingido para NF {chave_nf}", retry_after=retry_after)
+
         if response1.status_code == 422:
             if debug_mode:
                 logger.info(f"⚠️  Erro 422 - Possível rate limiting")
@@ -698,11 +715,17 @@ def consultar_due_por_nf(chave_nf: str, debug_mode: bool = False) -> dict[str, A
         
         response1.raise_for_status()
         dados1 = response1.json()
-        
+
+        # Verificar se é erro PUCX-ER1001 (rate limit do Siscomex retornado como 200)
+        if isinstance(dados1, dict) and dados1.get('code') == 'PUCX-ER1001':
+            msg = dados1.get('message', 'Rate limit atingido')
+            logger.warning(f"⚠️ Rate limit Siscomex (PUCX-ER1001) para NF {chave_nf[:20]}: {msg}")
+            raise RateLimitError(f"PUCX-ER1001: {msg}", retry_after=3600)
+
         if debug_mode:
             logger.info(f"   Response type: {type(dados1)}")
             logger.info(f"   Response length: {len(dados1) if isinstance(dados1, list) else 'Not a list'}")
-        
+
         if not dados1 or len(dados1) == 0:
             if debug_mode:
                 logger.info(f"⚠️  Primeira consulta retornou dados vazios")
@@ -724,13 +747,24 @@ def consultar_due_por_nf(chave_nf: str, debug_mode: bool = False) -> dict[str, A
         
         # Segunda consulta: obter detalhes básicos da DU-E
         response2 = token_manager.request("GET", href_due, headers=token_manager.obter_headers(), timeout=DEFAULT_HTTP_TIMEOUT_SEC)
-        
+
         if response2.status_code == 401:
             return {"error": "token_expirado", "chave": chave_nf}
-        
+
+        if response2.status_code == 429:
+            retry_after = int(response2.headers.get('Retry-After', 3600))
+            logger.warning(f"⚠️ Rate limit atingido (429) na segunda consulta para NF {chave_nf[:20]}. Retry-After: {retry_after}s")
+            raise RateLimitError(f"Rate limit atingido na segunda consulta para NF {chave_nf}", retry_after=retry_after)
+
         response2.raise_for_status()
         dados2 = response2.json()
-        
+
+        # Verificar se é erro PUCX-ER1001 (rate limit do Siscomex retornado como 200)
+        if isinstance(dados2, dict) and dados2.get('code') == 'PUCX-ER1001':
+            msg = dados2.get('message', 'Rate limit atingido')
+            logger.warning(f"⚠️ Rate limit Siscomex (PUCX-ER1001) na segunda consulta para NF {chave_nf[:20]}: {msg}")
+            raise RateLimitError(f"PUCX-ER1001: {msg}", retry_after=3600)
+
         # Verificar se já temos dados suficientes na segunda consulta
         if debug_mode:
             logger.info(f"📋 Dados da segunda consulta:")

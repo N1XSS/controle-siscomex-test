@@ -50,6 +50,7 @@ from src.core.exceptions import (
     ConfigurationError,
     ControleSiscomexError,
     DUEProcessingError,
+    RateLimitError,
     SiscomexAPIError,
 )
 from src.api.siscomex.token import token_manager
@@ -250,6 +251,9 @@ def baixar_due_completa(numero_due: str) -> dict[str, Any] | None:
 
     Returns:
         Dicionário com dados normalizados da DUE ou None em caso de erro
+
+    Raises:
+        RateLimitError: Se o rate limit da API for atingido (429)
     """
     try:
         # Consultar DUE principal
@@ -266,9 +270,44 @@ def baixar_due_completa(numero_due: str) -> dict[str, Any] | None:
 
         return dados_norm
 
+    except RateLimitError:
+        # Propagar rate limit para que o chamador possa salvar dados parciais
+        raise
     except Exception as e:
         logger.warning(f"Erro ao baixar DUE {numero_due}: {e}")
         return None
+
+
+def _salvar_dados_parciais(dados_consolidados: dict, motivo: str) -> int:
+    """
+    Salva dados parciais no banco quando há interrupção.
+
+    Args:
+        dados_consolidados: Dados já baixados para salvar
+        motivo: Motivo da interrupção (ex: "rate limit", "interrupcao manual")
+
+    Returns:
+        Número de DUEs salvas
+    """
+    # Contar DUEs nos dados
+    dues_pendentes = len(dados_consolidados.get('due_principal', []))
+
+    if dues_pendentes == 0:
+        logger.info(f"[INFO] Nenhum dado para salvar ({motivo})")
+        return 0
+
+    logger.warning(f"\n{'='*60}")
+    logger.warning(f"⚠️ SALVANDO DADOS PARCIAIS ({motivo})")
+    logger.warning(f"{'='*60}")
+    logger.info(f"[INFO] {dues_pendentes} DUEs pendentes para salvar...")
+
+    try:
+        salvas, erros = salvar_resultados_normalizados(dados_consolidados)
+        logger.info(f"[OK] {salvas} DUEs salvas com sucesso, {erros} erros")
+        return salvas
+    except Exception as e:
+        logger.error(f"[ERRO] Falha ao salvar dados parciais: {e}")
+        return 0
 
 
 @timed
@@ -420,28 +459,64 @@ def processar_novas_nfs() -> None:
             
             dues_ok = 0
             dues_erro = 0
+            rate_limit_atingido = False
+            interrupcao_manual = False
 
             # Usar processamento paralelo se habilitado
-            if ENABLE_PARALLEL_DOWNLOADS and len(dues_para_baixar) > 1:
-                max_workers = max(1, args.workers_download)
-                logger.info(f"  Baixando DUEs em paralelo com {max_workers} workers...")
+            try:
+                if ENABLE_PARALLEL_DOWNLOADS and len(dues_para_baixar) > 1:
+                    max_workers = max(1, args.workers_download)
+                    logger.info(f"  Baixando DUEs em paralelo com {max_workers} workers...")
 
-                with ThreadPoolExecutor(max_workers=max_workers) as executor:
-                    # Submeter todas as DUEs para download paralelo
-                    future_to_due = {
-                        executor.submit(baixar_due_completa, numero_due): numero_due
-                        for numero_due in dues_para_baixar
-                    }
+                    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+                        # Submeter todas as DUEs para download paralelo
+                        future_to_due = {
+                            executor.submit(baixar_due_completa, numero_due): numero_due
+                            for numero_due in dues_para_baixar
+                        }
 
-                    # Processar resultados conforme completam
-                    for i, future in enumerate(as_completed(future_to_due), 1):
-                        numero_due = future_to_due[future]
+                        # Processar resultados conforme completam
+                        for i, future in enumerate(as_completed(future_to_due), 1):
+                            numero_due = future_to_due[future]
 
+                            if i % 10 == 0:
+                                logger.info(f"  [PROGRESSO] {i}/{len(dues_para_baixar)} DUEs...")
+
+                            try:
+                                dados_norm = future.result()
+
+                                if dados_norm:
+                                    for tabela, dados in dados_norm.items():
+                                        if tabela in dados_consolidados:
+                                            dados_consolidados[tabela].extend(dados)
+                                    dues_ok += 1
+                                else:
+                                    dues_erro += 1
+                                    erros_coletados.append(f"DUE {numero_due}: falha ao baixar dados")
+
+                            except RateLimitError as e:
+                                logger.warning(f"⚠️ Rate limit atingido! Salvando dados parciais...")
+                                rate_limit_atingido = True
+                                erros_coletados.append(f"Rate limit atingido: {str(e)[:80]}")
+                                # Cancelar tarefas pendentes
+                                for f in future_to_due:
+                                    f.cancel()
+                                break
+
+                            except Exception as e:
+                                logger.warning(f"Erro ao processar DUE {numero_due}: {e}")
+                                dues_erro += 1
+                                erros_coletados.append(f"DUE {numero_due}: {str(e)[:80]}")
+                else:
+                    # Fallback para processamento sequencial (se desabilitado ou uma única DUE)
+                    logger.info("  Baixando DUEs sequencialmente...")
+
+                    for i, numero_due in enumerate(dues_para_baixar, 1):
                         if i % 10 == 0:
                             logger.info(f"  [PROGRESSO] {i}/{len(dues_para_baixar)} DUEs...")
 
                         try:
-                            dados_norm = future.result()
+                            dados_norm = baixar_due_completa(numero_due)
 
                             if dados_norm:
                                 for tabela, dados in dados_norm.items():
@@ -450,45 +525,40 @@ def processar_novas_nfs() -> None:
                                 dues_ok += 1
                             else:
                                 dues_erro += 1
-                                erros_coletados.append(f"DUE {numero_due}: falha ao baixar dados")
+                                erros_coletados.append(f"DUE {numero_due}: falha ao baixar dados (sequencial)")
 
-                        except Exception as e:
-                            logger.warning(f"Erro ao processar DUE {numero_due}: {e}")
-                            dues_erro += 1
-                            erros_coletados.append(f"DUE {numero_due}: {str(e)[:80]}")
+                        except RateLimitError as e:
+                            logger.warning(f"⚠️ Rate limit atingido! Salvando dados parciais...")
+                            rate_limit_atingido = True
+                            erros_coletados.append(f"Rate limit atingido: {str(e)[:80]}")
+                            break
+
+            except KeyboardInterrupt:
+                logger.warning("\n⚠️ Interrupção manual detectada (Ctrl+C)! Salvando dados parciais...")
+                interrupcao_manual = True
+                erros_coletados.append("Interrupção manual (Ctrl+C)")
+
+            # Salvar dados parciais se houve interrupção
+            if rate_limit_atingido or interrupcao_manual:
+                motivo = "rate limit 429" if rate_limit_atingido else "interrupcao manual"
+                dues_salvas_banco = _salvar_dados_parciais(dados_consolidados, motivo)
+                avisos_coletados.append(f"Dados parciais salvos: {dues_salvas_banco} DUEs ({motivo})")
             else:
-                # Fallback para processamento sequencial (se desabilitado ou uma única DUE)
-                logger.info("  Baixando DUEs sequencialmente...")
+                # Salvamento normal (sem interrupção)
+                logger.info(f"\n[OK] {dues_ok} DUEs baixadas com sucesso")
+                if dues_erro > 0:
+                    logger.warning(f"[AVISO] {dues_erro} DUEs com erro no download")
 
-                for i, numero_due in enumerate(dues_para_baixar, 1):
-                    if i % 10 == 0:
-                        logger.info(f"  [PROGRESSO] {i}/{len(dues_para_baixar)} DUEs...")
-
-                    dados_norm = baixar_due_completa(numero_due)
-
-                    if dados_norm:
-                        for tabela, dados in dados_norm.items():
-                            if tabela in dados_consolidados:
-                                dados_consolidados[tabela].extend(dados)
-                        dues_ok += 1
+                # Salvar dados no banco
+                if dues_ok > 0:
+                    resultado = salvar_resultados_normalizados(dados_consolidados)
+                    # Verificar se retornou tupla (dues_salvas, dues_erro)
+                    if isinstance(resultado, tuple):
+                        dues_salvas_banco, erros_banco = resultado
+                        if erros_banco > 0:
+                            avisos_coletados.append(f"{erros_banco} DUEs falharam ao salvar no banco")
                     else:
-                        dues_erro += 1
-                        erros_coletados.append(f"DUE {numero_due}: falha ao baixar dados (sequencial)")
-
-            logger.info(f"\n[OK] {dues_ok} DUEs baixadas com sucesso")
-            if dues_erro > 0:
-                logger.warning(f"[AVISO] {dues_erro} DUEs com erro no download")
-
-            # Salvar dados no banco
-            if dues_ok > 0:
-                resultado = salvar_resultados_normalizados(dados_consolidados)
-                # Verificar se retornou tupla (dues_salvas, dues_erro)
-                if isinstance(resultado, tuple):
-                    dues_salvas_banco, erros_banco = resultado
-                    if erros_banco > 0:
-                        avisos_coletados.append(f"{erros_banco} DUEs falharam ao salvar no banco")
-                else:
-                    dues_salvas_banco = dues_ok  # fallback
+                        dues_salvas_banco = dues_ok  # fallback
 
         # 9. Calcular tempo de execução
         fim_execucao = datetime.now()
